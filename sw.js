@@ -16,8 +16,8 @@ const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
-  './icon192.png',
-  './icon512.png'
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 const NEVER_CACHE_DOMAINS = [
