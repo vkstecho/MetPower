@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="google" content="notranslate">
+<title>MetPower — Metalliser Industry Management</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon-512.png">
+
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=Noto+Sans+Devanagari:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --bg:#0a0e16; --bg2:#0f1521; --card:#151c2a; --card2:#1c2435;
+  --border:rgba(255,255,255,.06); --border2:rgba(255,255,255,.10);
+  --text:#f1f5f9; --muted:#94a3b8; --muted2:#64748b;
+
+  /* MetPower theme: industrial orange-amber */
+  --primary:#f97316; --primary2:#ea580c;
+  --accent:#fbbf24; --accent2:#f59e0b;
+  --green:#22c55e; --red:#ef4444; --blue:#3b82f6; --purple:#a855f7;
+
+  --hdr-h:60px; --nav-h:64px;
+  --m1:#f97316; --m2:#fbbf24; --s1:#06b6d4; --s2:#0ea5e9;
+  --sup:#a855f7; --mgr:#ec4899;
+}
+body.light{
+  --bg:#f8fafc; --bg2:#fff; --card:#f1f5f9; --card2:#e2e8f0;
+  --border:rgba(0,0,0,.08); --border2:rgba(0,0,0,.12);
+  --text:#0f172a; --muted:#64748b; --muted2:#94a3b8;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;font-family:'Barlow Condensed','Noto Sans Devanagari',-apple-system,BlinkMacSystemFont,sans-serif;
+  background:var(--bg);color:var(--text);overflow-x:hidden;letter-spacing:-.01em;}
+body{padding-bottom:env(safe-area-inset-bottom);}
+
+/* === HEADER === */
+.hdr{position:sticky;top:0;z-index:100;background:var(--bg2);
+  border-bottom:1px solid var(--border);padding:8px 14px;
+  display:flex;align-items:center;gap:10px;height:var(--hdr-h);}
+.hdr-logo{width:36px;height:36px;border-radius:9px;object-fit:cover;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  border:1px solid var(--border2);flex-shrink:0;}
+.brand{font-size:22px;font-weight:900;letter-spacing:-.5px;line-height:1;}
+.brand .dot{color:var(--primary);}
+.hdr-spacer{flex:1;}
+.hdr-btn{background:var(--card);border:1px solid var(--border2);color:var(--text);
+  padding:0;width:40px;height:40px;border-radius:10px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;
+  font-family:inherit;flex-shrink:0;transition:transform .1s;}
+.hdr-btn:active{transform:scale(.92);}
+
+/* === LEARN & GROW BAR === */
+.learn-bar{background:linear-gradient(135deg,#7c3aed,#9333ea);
+  padding:14px 16px;display:flex;align-items:center;gap:12px;
+  cursor:pointer;border:none;width:100%;color:#fff;font-family:inherit;}
+.learn-bar:hover{filter:brightness(1.08);}
+.learn-bar:active{transform:scale(.99);}
+.learn-bar-icon{font-size:24px;flex-shrink:0;}
+.learn-bar-content{flex:1;text-align:left;}
+.learn-bar-title{font-size:18px;font-weight:900;}
+.learn-bar-sub{font-size:11px;opacity:.85;font-weight:600;margin-top:1px;}
+.learn-bar-arrow{font-size:18px;opacity:.85;}
+
+/* === SYNC ROW === */
+.sync-row{display:flex;align-items:center;gap:6px;padding:6px 14px;
+  background:rgba(34,197,94,.06);border-bottom:1px solid var(--border);
+  font-size:11px;color:var(--green);font-weight:700;}
+
+/* === LOGIN === */
+.auth-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:20px;
+  background:radial-gradient(ellipse at top,rgba(249,115,22,.12),transparent 60%);}
+.auth-card{width:100%;max-width:440px;background:var(--bg2);border:1px solid var(--border);
+  border-radius:24px;padding:32px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4);}
+.auth-logo-img{width:80px;height:80px;border-radius:20px;object-fit:cover;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  border:1px solid var(--border2);box-shadow:0 8px 24px rgba(249,115,22,.3);
+  display:block;margin:0 auto 16px;}
+.auth-logo{font-size:42px;font-weight:900;letter-spacing:-1.5px;text-align:center;line-height:1;
+  margin-bottom:6px;}
+.auth-logo .met{background:linear-gradient(135deg,var(--primary),var(--accent));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.auth-tagline{text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px;}
+.auth-title{font-size:22px;font-weight:800;text-align:center;margin-bottom:6px;}
+.auth-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;}
+
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:11px;font-weight:700;color:var(--muted);
+  margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;}
+.field input,.field select,.field textarea{width:100%;padding:13px 14px;border-radius:11px;
+  border:1.5px solid var(--border2);background:var(--card);color:var(--text);
+  font-size:15px;font-family:inherit;outline:none;transition:border-color .15s;}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary);}
+
+.btn-primary{width:100%;padding:14px;border-radius:12px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,var(--primary),var(--primary2));color:#fff;
+  font-size:15px;font-weight:800;font-family:inherit;
+  box-shadow:0 4px 20px rgba(249,115,22,.35);transition:transform .1s;}
+.btn-primary:active{transform:scale(.98);}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+.btn-secondary{width:100%;padding:13px;border-radius:12px;border:1px solid var(--border2);
+  background:var(--card);color:var(--text);font-size:14px;font-weight:700;
+  font-family:inherit;cursor:pointer;margin-top:10px;}
+
+.phone-row{display:flex;gap:8px;}
+.phone-row .ccode{flex:0 0 70px;text-align:center;font-weight:800;}
+.phone-row input{flex:1;}
+
+.otp-input{font-size:24px;letter-spacing:8px;text-align:center;font-weight:800;}
+
+.hint{font-size:11px;color:var(--muted2);text-align:center;margin-top:14px;line-height:1.5;}
+
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+
+/* === MAIN APP === */
+.main{padding:14px;max-width:1200px;margin:0 auto;padding-bottom:90px;}
+.page-title{font-size:24px;font-weight:800;margin-bottom:4px;letter-spacing:-.5px;line-height:1.1;}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:18px;}
+
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;}
+.card-row{display:flex;align-items:center;gap:10px;}
+.card-name{font-size:15px;font-weight:800;letter-spacing:-.2px;}
+.card-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+
+.empty{padding:40px 20px;text-align:center;color:var(--muted);}
+.empty-ico{font-size:48px;margin-bottom:8px;opacity:.6;}
+
+.badge{display:inline-block;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800;
+  text-transform:uppercase;letter-spacing:.5px;}
+.badge.pending{background:rgba(245,158,11,.15);color:var(--accent2);border:1px solid rgba(245,158,11,.3);}
+.badge.active{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);}
+.badge.suspended{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3);}
+.badge.trial{background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.3);}
+
+.act-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.act-btn{flex:1;min-width:90px;padding:9px 10px;border-radius:9px;border:1px solid var(--border2);
+  background:var(--card);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;
+  font-family:inherit;}
+.act-btn.green{border-color:rgba(34,197,94,.4);color:var(--green);background:rgba(34,197,94,.08);}
+.act-btn.red{border-color:rgba(239,68,68,.4);color:var(--red);background:rgba(239,68,68,.08);}
+.act-btn.amber{border-color:rgba(245,158,11,.4);color:var(--accent2);background:rgba(245,158,11,.08);}
+
+/* Stats grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px;}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px;}
+.stat-val{font-size:30px;font-weight:900;letter-spacing:-1px;line-height:1;}
+.stat-lbl{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;margin-top:4px;}
+
+/* === BOTTOM NAV === */
+.nav{position:fixed;bottom:0;left:0;right:0;height:var(--nav-h);
+  background:var(--bg2);border-top:1px solid var(--border);
+  display:flex;z-index:90;
+  padding-bottom:env(safe-area-inset-bottom);}
+.nb{flex:1;border:none;background:none;color:var(--muted);
+  font-family:inherit;font-size:10px;font-weight:800;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  cursor:pointer;border-top:3px solid transparent;padding-top:6px;
+  transition:color .15s,border-color .15s;}
+.nb.on{color:var(--primary);border-top-color:var(--primary);}
+.nb-ico{font-size:22px;line-height:1;}
+.tab{display:none;}.tab.on{display:block;}
+
+/* === LEARN SCREEN === */
+.learn-screen{display:none;position:fixed;inset:0;z-index:400;
+  background:var(--bg);overflow-y:auto;}
+.learn-screen.show{display:block;}
+.learn-hdr{position:sticky;top:0;background:var(--bg2);padding:14px 16px;
+  display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);z-index:5;}
+.learn-hdr-back{background:var(--card);border:1px solid var(--border2);
+  padding:8px 12px;border-radius:10px;color:var(--text);
+  font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;}
+.learn-hdr-title{flex:1;font-size:17px;font-weight:800;}
+.learn-cards{padding:16px;display:grid;grid-template-columns:1fr;gap:12px;}
+.learn-card{background:var(--bg2);border:1.5px solid var(--border);
+  border-radius:16px;padding:16px;cursor:pointer;display:flex;align-items:center;gap:14px;
+  transition:transform .15s,border-color .15s;font-family:inherit;text-align:left;color:var(--text);}
+.learn-card:hover{border-color:var(--primary);transform:translateY(-2px);}
+.learn-card-icon{width:54px;height:54px;border-radius:14px;
+  display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;}
+.learn-card-text{flex:1;}
+.learn-card-name{font-size:17px;font-weight:800;}
+.learn-card-desc{font-size:12px;color:var(--muted);margin-top:3px;}
+.learn-card-arrow{font-size:18px;color:var(--muted);}
+
+/* === IFRAME OVERLAY === */
+.iframe-overlay{display:none;position:fixed;inset:0;z-index:500;background:#000;
+  flex-direction:column;}
+.iframe-overlay.show{display:flex;}
+.iframe-hdr{background:var(--bg2);padding:10px 14px;display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid var(--border);flex-shrink:0;height:50px;}
+.iframe-hdr-title{flex:1;font-size:14px;font-weight:800;}
+.iframe-body{flex:1;width:100%;border:none;background:#fff;}
+
+/* === TOAST === */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);
+  background:var(--card2);color:#fff;padding:12px 22px;border-radius:12px;
+  font-size:13px;font-weight:700;z-index:9999;border:1px solid var(--border2);
+  opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;
+  max-width:90vw;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.5);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-8px);}
+
+/* === LOADING === */
+.spinner{display:inline-block;width:18px;height:18px;border:2.5px solid rgba(255,255,255,.2);
+  border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+#loadingScreen{position:fixed;inset:0;background:var(--bg);z-index:99999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;}
+
+/* === MODAL === */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9998;
+  display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(4px);}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--bg2);border-radius:24px 24px 0 0;width:100%;max-width:480px;
+  padding:24px 20px 36px;border-top:1px solid var(--border2);
+  max-height:90vh;overflow-y:auto;animation:slideUp .25s ease;}
+@keyframes slideUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+.modal-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;
+  margin:0 auto 16px;}
+.modal-title{font-size:18px;font-weight:800;margin-bottom:6px;text-align:center;}
+.modal-sub{font-size:13px;color:var(--muted);text-align:center;margin-bottom:20px;}
+
+#recaptchaContainer{position:fixed;bottom:0;right:0;}
+.role-view{display:none;}
+
+/* === PC SIDEBAR (≥900px) === */
+@media (min-width:900px){
+  body{padding-left:240px;}
+  .nav{display:none !important;}
+  .pc-sidebar{display:flex;flex-direction:column;
+    position:fixed;top:0;left:0;bottom:0;width:240px;
+    background:var(--bg2);border-right:1px solid var(--border);z-index:99;
+    padding:14px 12px;}
+  .pc-sidebar-brand{display:flex;align-items:center;gap:10px;padding:8px 4px 14px;
+    border-bottom:1px solid var(--border);margin-bottom:14px;}
+  .pc-sidebar-logo{width:36px;height:36px;border-radius:9px;
+    background:linear-gradient(135deg,var(--primary),var(--accent));}
+  .pc-nav-btn{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;
+    border:none;background:none;color:var(--muted);
+    font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;
+    text-align:left;width:100%;margin-bottom:3px;transition:all .15s;}
+  .pc-nav-btn:hover{background:var(--card);color:var(--text);}
+  .pc-nav-btn.on{background:rgba(249,115,22,.1);color:var(--primary);}
+  .pc-nav-ico{font-size:20px;line-height:1;}
+  .hdr{display:none;}
+  .main{padding:24px 28px 28px;}
+  .page-sidebar-hdr{display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:18px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .page-sidebar-hdr-actions{display:flex;gap:10px;}
+}
+@media (max-width:899px){
+  .pc-sidebar{display:none !important;}
+  .page-sidebar-hdr{display:none;}
+}
+
+@media (min-width:1100px){
+  .stats{grid-template-columns:repeat(4,1fr);}
+}
+</style>
+</head>
+<body>
+
+<!-- ═════════════════════════════════════════════
+     LOADING SCREEN
+═══════════════════════════════════════════════ -->
+<div id="loadingScreen">
+  <img src="icon-512.png" alt="MetPower"
+    style="width:96px;height:96px;border-radius:22px;object-fit:cover;
+           background:linear-gradient(135deg,var(--primary),var(--accent));border:1px solid var(--border2);"
+    onerror="this.style.display='none'">
+  <div class="auth-logo" style="font-size:32px;margin-top:14px">
+    <span class="met">Met</span>Power
+  </div>
+  <div class="spinner" style="margin-top:18px;width:32px;height:32px;border-width:3px;border-top-color:var(--primary)"></div>
+</div>
+
+<!-- ═════════════════════════════════════════════
+     AUTH SCREENS
+═══════════════════════════════════════════════ -->
+<div id="authView" style="display:none">
+
+  <!-- 1. Phone -->
+  <div id="phoneScreen" class="auth-screen">
+    <div class="auth-card">
+      <img src="icon-512.png" alt="MetPower" class="auth-logo-img" onerror="this.style.display='none'">
+      <div class="auth-logo"><span class="met">Met</span>Power</div>
+      <div class="auth-tagline">Smart Manpower for Metalliser Industry</div>
+
+      <div class="auth-title">Welcome 👋</div>
+      <div class="auth-sub">Enter your mobile number to continue</div>
+
+      <div class="field">
+        <label>Mobile Number</label>
+        <div class="phone-row">
+          <input type="text" class="ccode" value="+91" readonly>
+          <input type="tel" id="phoneInput" placeholder="10-digit mobile" maxlength="10" inputmode="numeric">
+        </div>
+      </div>
+
+      <button class="btn-primary" id="sendOtpBtn" onclick="sendOtp()">Send OTP</button>
+
+      <div class="hint">
+        We'll send a one-time password to verify your number.<br>
+        By continuing, you agree to our <a href="terms.html" target="_blank" style="color:var(--primary)">Terms</a> &amp; <a href="privacy.html" target="_blank" style="color:var(--primary)">Privacy Policy</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. OTP -->
+  <div id="otpScreen" class="auth-screen" style="display:none">
+    <div class="auth-card">
+      <div class="auth-title">Verify OTP</div>
+      <div class="auth-sub">Code sent to <b id="otpPhoneLbl">+91 ...</b></div>
+
+      <div class="field">
+        <label>6-Digit OTP</label>
+        <input type="text" id="otpInput" class="otp-input" placeholder="------" maxlength="6" inputmode="numeric">
+      </div>
+
+      <button class="btn-primary" id="verifyOtpBtn" onclick="verifyOtp()">Verify &amp; Continue</button>
+      <button class="btn-secondary" onclick="backToPhone()">← Change Number</button>
+
+      <div class="hint">
+        Didn't receive? <a href="#" onclick="event.preventDefault();sendOtp()" style="color:var(--primary)">Resend</a>
+        &nbsp;·&nbsp; <span id="otpTimer"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Manager Registration (Industry-specific) -->
+  <div id="registerScreen" class="auth-screen" style="display:none">
+    <div class="auth-card">
+      <div class="auth-title">Register Your Plant</div>
+      <div class="auth-sub">Tell us about yourself and your facility</div>
+
+      <div class="field">
+        <label>Your Full Name</label>
+        <input type="text" id="regName" placeholder="e.g. Vivek Kumar Shukla">
+      </div>
+
+      <div class="field">
+        <label>Company / Plant Name</label>
+        <input type="text" id="regCompanyName" placeholder="e.g. ABC Polyfilms Pvt. Ltd.">
+      </div>
+
+      <div class="field">
+        <label>Type of Operation</label>
+        <select id="regCompanyType">
+          <option value="">Select operation type...</option>
+          <option value="metalliser">Metalliser Only</option>
+          <option value="slitter">Slitter Only</option>
+          <option value="metalliser_slitter">Metalliser + Slitter</option>
+          <option value="vacuum_coating">Vacuum Coating</option>
+          <option value="aluminum_foil">Aluminum Foil Production</option>
+          <option value="bopp_film">BOPP Film + Metalliser</option>
+          <option value="other">Other Metalliser/Coating</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label># Metallisers</label>
+          <input type="number" id="regNumMet" placeholder="0" min="0" max="20" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label># Slitters</label>
+          <input type="number" id="regNumSlit" placeholder="0" min="0" max="20" inputmode="numeric">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Plant Location</label>
+        <input type="text" id="regPlantLocation" placeholder="e.g. Greater Noida, UP">
+      </div>
+
+      <div class="field">
+        <label>Your Employee Code</label>
+        <input type="text" id="regEmpCode" placeholder="e.g. EMP001">
+      </div>
+
+      <div class="field">
+        <label>Your Designation</label>
+        <input type="text" id="regDesignation" placeholder="e.g. Plant Head / Production Manager">
+      </div>
+
+      <button class="btn-primary" onclick="submitRegistration()">Submit Registration</button>
+
+      <div class="hint">
+        Your request will be reviewed within 24 hours.<br>
+        Once approved, you get a 30-day free trial.
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Pending -->
+  <div id="pendingScreen" class="auth-screen" style="display:none">
+    <div class="auth-card" style="text-align:center">
+      <div style="font-size:64px;margin-bottom:12px">⏳</div>
+      <div class="auth-title">Approval Pending</div>
+      <div class="auth-sub" style="margin-bottom:20px">
+        Your registration is under review.<br>
+        We'll notify you once approved (usually within 24 hours).
+      </div>
+      <div class="card" style="text-align:left;background:var(--card)">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Registered as</div>
+        <div style="font-weight:800" id="pendingName">—</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px" id="pendingCompany">—</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px" id="pendingDate">—</div>
+      </div>
+      <button class="btn-secondary" onclick="logout()" style="margin-top:18px">Logout</button>
+    </div>
+  </div>
+
+  <!-- 5. Paywall -->
+  <div id="paywallScreen" class="auth-screen" style="display:none">
+    <div class="auth-card" style="text-align:center">
+      <div style="font-size:64px;margin-bottom:12px">⏰</div>
+      <div class="auth-title">Free Trial Ended</div>
+      <div class="auth-sub">Your 30-day free trial has ended. Upgrade to continue using MetPower.</div>
+      <button class="btn-primary" onclick="contactAdmin()" style="margin-top:18px">💬 Contact for Subscription</button>
+      <button class="btn-secondary" onclick="logout()">Logout</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════════════════════
+     MAIN APP
+═══════════════════════════════════════════════ -->
+<div id="appView" style="display:none">
+
+  <!-- PC Sidebar -->
+  <aside class="pc-sidebar">
+    <div class="pc-sidebar-brand">
+      <img src="icon-192.png" class="pc-sidebar-logo" alt="" onerror="this.style.display='none'">
+      <div class="brand"><span style="color:var(--primary)">Met</span>Power</div>
+    </div>
+    <div id="pcNav"></div>
+  </aside>
+
+  <!-- Mobile Header -->
+  <header class="hdr">
+    <img src="icon-192.png" class="hdr-logo" alt="" onerror="this.style.display='none'">
+    <div class="brand"><span class="dot">Met</span>Power</div>
+    <div class="hdr-spacer"></div>
+    <button class="hdr-btn" id="langToggleBtn" onclick="toggleLang()" title="Language">EN</button>
+    <button class="hdr-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Theme">🌙</button>
+    <button class="hdr-btn" onclick="openProfile()">👤</button>
+  </header>
+
+  <!-- Learn & Grow Bar (always visible at top of main area) -->
+  <button class="learn-bar" onclick="openLearn()">
+    <div class="learn-bar-icon">🚀</div>
+    <div class="learn-bar-content">
+      <div class="learn-bar-title" id="learnBarTitle">Learn &amp; Grow</div>
+      <div class="learn-bar-sub">Met Train · MetCost · MRM · Time Study · SupSkill</div>
+    </div>
+    <div class="learn-bar-arrow">›</div>
+  </button>
+
+  <!-- Sync row -->
+  <div class="sync-row">
+    <span id="syncLabel">🔄 Live Sync · Last Update:</span>
+    <span id="syncTime">—</span>
+  </div>
+
+  <main class="main">
+
+    <!-- Home Tab -->
+    <div class="tab on" id="tab-home">
+      <!-- ADMIN -->
+      <div class="role-view role-admin" id="adminDashboard">
+        <div class="page-sidebar-hdr">
+          <div>
+            <div class="page-title">Super Admin Dashboard 👑</div>
+            <div class="page-sub">Manage all registered metalliser companies</div>
+          </div>
+        </div>
+        <div class="page-title" style="margin-bottom:0;display:none" id="adminMobTitle">Super Admin 👑</div>
+        <div class="page-sub" id="adminMobSub" style="display:none">All registered companies</div>
+
+        <div class="stats">
+          <div class="stat"><div class="stat-val" id="statTotalCompanies">0</div><div class="stat-lbl">Total Companies</div></div>
+          <div class="stat"><div class="stat-val" style="color:var(--accent2)" id="statPending">0</div><div class="stat-lbl">Pending</div></div>
+          <div class="stat"><div class="stat-val" style="color:var(--green)" id="statActive">0</div><div class="stat-lbl">Active</div></div>
+          <div class="stat"><div class="stat-val" style="color:var(--purple)" id="statTrials">0</div><div class="stat-lbl">On Trial</div></div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px;overflow-x:auto;padding-bottom:4px">
+          <button class="act-btn amber" onclick="showAdminTab('pending')" id="tabBtn-pending">⏳ Pending</button>
+          <button class="act-btn green" onclick="showAdminTab('active')" id="tabBtn-active">✓ Active</button>
+          <button class="act-btn" onclick="showAdminTab('all')" id="tabBtn-all">All</button>
+        </div>
+        <div id="adminContent">
+          <div class="empty"><div class="empty-ico">⏳</div><div>Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- MANAGER -->
+      <div class="role-view role-manager" id="managerDashboard">
+        <div class="page-title" id="mgrCompanyName">Loading...</div>
+        <div class="page-sub" id="mgrCompanyMeta">—</div>
+
+        <div class="stats">
+          <div class="stat"><div class="stat-val" id="mgrTotalEmps">0</div><div class="stat-lbl">Team Size</div></div>
+          <div class="stat"><div class="stat-val" id="mgrSections">0</div><div class="stat-lbl">Sections</div></div>
+          <div class="stat"><div class="stat-val" style="color:var(--green)" id="mgrTrialDays">—</div><div class="stat-lbl">Trial Days Left</div></div>
+        </div>
+
+        <div class="card" style="background:linear-gradient(135deg,rgba(249,115,22,.08),rgba(251,191,36,.04));border-color:rgba(249,115,22,.3)">
+          <div style="font-size:14px;font-weight:800;margin-bottom:8px">🚀 Phase 1 — Foundation Ready</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.6">
+            Welcome to MetPower! Your account is active.
+            <br><br>
+            <b>Available now:</b> Learn &amp; Grow modules (Met Train, MetCost, MRM, Time Study, SupSkill).
+            <br><br>
+            <b>Coming next:</b> Section setup, Team management, Schedule builder, Leaves, NCRs, Reports.
+          </div>
+        </div>
+
+        <div class="card" id="quickStartCard">
+          <div class="card-name">📋 Quick Start</div>
+          <div class="card-sub" style="margin-top:6px">Once Phase 2 launches, you'll set up:</div>
+          <ul style="margin-top:10px;padding-left:20px;font-size:13px;color:var(--muted);line-height:1.8">
+            <li>Custom sections (e.g. Met-1, Met-2, Slitter-1)</li>
+            <li>Team members with phone numbers</li>
+            <li>Auto-generated shift rotations</li>
+            <li>WhatsApp notifications on shift change</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- MEMBER -->
+      <div class="role-view role-member" id="memberDashboard">
+        <div class="page-title" id="memberName">—</div>
+        <div class="page-sub" id="memberMeta">—</div>
+        <div class="card">
+          <div class="card-name">📅 My Shift</div>
+          <div class="card-sub" style="margin-top:6px">
+            Your shift schedule will appear here once your manager sets it up.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule Tab (placeholder Phase 3) -->
+    <div class="tab" id="tab-schedule">
+      <div class="page-title">📅 Schedule</div>
+      <div class="page-sub">Coming in Phase 3</div>
+      <div class="empty">
+        <div class="empty-ico">🚧</div>
+        <div>Shift Schedule features will be enabled in Phase 3.</div>
+      </div>
+    </div>
+
+    <!-- Leave Tab -->
+    <div class="tab" id="tab-leave">
+      <div class="page-title">🏖️ Leaves</div>
+      <div class="page-sub">Coming in Phase 4</div>
+      <div class="empty">
+        <div class="empty-ico">🚧</div>
+        <div>Leave management will be enabled in Phase 4.</div>
+      </div>
+    </div>
+
+    <!-- Reports Tab -->
+    <div class="tab" id="tab-reports">
+      <div class="page-title">📋 Reports</div>
+      <div class="page-sub">Coming in Phase 4</div>
+      <div class="empty">
+        <div class="empty-ico">🚧</div>
+        <div>NCR &amp; Reports features coming soon.</div>
+      </div>
+    </div>
+
+    <!-- Team Tab -->
+    <div class="tab" id="tab-team">
+      <div class="page-title">👥 Team</div>
+      <div class="page-sub">Coming in Phase 2</div>
+      <div class="empty">
+        <div class="empty-ico">🚧</div>
+        <div>Team management coming in Phase 2.</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Nav (mobile) -->
+  <nav class="nav" id="mainNav"></nav>
+</div>
+
+<!-- ═════════════════════════════════════════════
+     LEARN & GROW SCREEN (overlay)
+═══════════════════════════════════════════════ -->
+<div id="learnScreen" class="learn-screen">
+  <div class="learn-hdr">
+    <button class="learn-hdr-back" onclick="closeLearn()">← Back</button>
+    <div class="learn-hdr-title">🚀 Learn &amp; Grow</div>
+  </div>
+  <div class="learn-cards">
+
+    <button class="learn-card" onclick="openIframe('MetalTrain_Pro_v5_Mobile.html','📚 Met Train PRO')">
+      <div class="learn-card-icon" style="background:rgba(34,197,94,.15);color:var(--green)">📚</div>
+      <div class="learn-card-text">
+        <div class="learn-card-name">Met Train PRO</div>
+        <div class="learn-card-desc">Hindi industrial training — SOPs, Quizzes, WIs</div>
+      </div>
+      <div class="learn-card-arrow">›</div>
+    </button>
+
+    <button class="learn-card" onclick="openIframe('metcost_pro.html','💰 MetCost Pro')">
+      <div class="learn-card-icon" style="background:rgba(249,115,22,.15);color:var(--primary)">💰</div>
+      <div class="learn-card-text">
+        <div class="learn-card-name">MetCost Pro</div>
+        <div class="learn-card-desc">Wire · Boat · Power · Wastage · Conversion Cost</div>
+      </div>
+      <div class="learn-card-arrow">›</div>
+    </button>
+
+    <button class="learn-card" onclick="openIframe('mrm_pres.html','📊 MRM Presentation')">
+      <div class="learn-card-icon" style="background:rgba(239,68,68,.15);color:var(--red)">📊</div>
+      <div class="learn-card-text">
+        <div class="learn-card-name">MRM Presentation</div>
+        <div class="learn-card-desc">Monthly Review · Cost Analysis · Auto-PPT</div>
+      </div>
+      <div class="learn-card-arrow">›</div>
+    </button>
+
+    <button class="learn-card" onclick="openIframe('timestudy.html','⏱️ Time Study')">
+      <div class="learn-card-icon" style="background:rgba(20,184,166,.15);color:#14b8a6">⏱️</div>
+      <div class="learn-card-text">
+        <div class="learn-card-name">Time Study</div>
+        <div class="learn-card-desc">1440 min Analysis · Machine Utilization</div>
+      </div>
+      <div class="learn-card-arrow">›</div>
+    </button>
+
+    <button class="learn-card" onclick="openIframe('supskill.html','🎓 SupSkill')">
+      <div class="learn-card-icon" style="background:rgba(168,85,247,.15);color:var(--purple)">🎓</div>
+      <div class="learn-card-text">
+        <div class="learn-card-name">SupSkill</div>
+        <div class="learn-card-desc">Supervisor Skills Hub — Best Practices</div>
+      </div>
+      <div class="learn-card-arrow">›</div>
+    </button>
+
+    <div style="text-align:center;font-size:11px;color:var(--muted2);margin-top:12px">
+      🎓 Tools shared by VKS Tech to upskill the metalliser industry
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════════════════════
+     IFRAME OVERLAY (full-screen)
+═══════════════════════════════════════════════ -->
+<div id="iframeOverlay" class="iframe-overlay">
+  <div class="iframe-hdr">
+    <button class="learn-hdr-back" onclick="closeIframe()">← Back</button>
+    <div class="iframe-hdr-title" id="iframeTitle">—</div>
+  </div>
+  <iframe id="iframeBody" class="iframe-body" src="about:blank"></iframe>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Modal -->
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<!-- reCAPTCHA -->
+<div id="recaptchaContainer"></div>
+
+<!-- ═════════════════════════════════════════════
+     SCRIPT
+═══════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const APP_VERSION = '0.1.0';
+const SUPER_ADMIN_PHONE = '+918929394920';
+const SUPER_ADMIN_WHATSAPP = '8929394920';
+const TRIAL_DAYS = 30;
+
+// Firebase config — Project: metpowervks (asia-southeast1 region)
+// Note: databaseURL is auto-generated from projectId + region.
+// If you created Realtime DB in a different region, update the URL accordingly.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAG3xE_Bfj7VuA3hg5ClUAKUy7S6TNExGs",
+  authDomain: "metpowervks.firebaseapp.com",
+  databaseURL: "https://metpowervks-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "metpowervks",
+  storageBucket: "metpowervks.firebasestorage.app",
+  messagingSenderId: "953633730980",
+  appId: "1:953633730980:web:3b5dfc28f0d8778cb3d131"
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FIREBASE INIT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _fbApp, _fbAuth, _fbDb;
+let _confirmationResult = null;
+let _recaptchaVerifier = null;
+let _otpResendTimer = null;
+
+try{
+  _fbApp = firebase.initializeApp(FIREBASE_CONFIG);
+  _fbAuth = firebase.auth();
+  _fbDb = firebase.database();
+}catch(e){ console.error('Firebase init failed:', e); }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const SESSION = {
+  phone: null, uid: null, role: null,
+  userData: null, companyId: null, companyData: null
+};
+let _currentTab = 'home';
+let _lang = localStorage.getItem('mp_lang') || 'en';
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// UI HELPERS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function $(id){ return document.getElementById(id); }
+function show(id){ const el=$(id); if(el) el.style.display=''; }
+function hide(id){ const el=$(id); if(el) el.style.display='none'; }
+function _esc(s){
+  if(s == null) return '';
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function toast(msg, ms=2800){
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(window._toastT);
+  window._toastT = setTimeout(()=> el.classList.remove('show'), ms);
+}
+function openModal(html){
+  $('modalBody').innerHTML = html;
+  $('modalOverlay').classList.add('open');
+}
+function closeModal(){ $('modalOverlay').classList.remove('open'); }
+$('modalOverlay').addEventListener('click', e => {
+  if(e.target.id === 'modalOverlay') closeModal();
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// THEME
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function initTheme(){
+  const saved = localStorage.getItem('mp_theme') || 'dark';
+  if(saved === 'light') document.body.classList.add('light');
+  updateThemeIcon();
+}
+function toggleTheme(){
+  document.body.classList.toggle('light');
+  localStorage.setItem('mp_theme', document.body.classList.contains('light') ? 'light' : 'dark');
+  updateThemeIcon();
+}
+function updateThemeIcon(){
+  const btn = $('themeToggleBtn');
+  if(btn) btn.textContent = document.body.classList.contains('light') ? '🌙' : '☀️';
+}
+initTheme();
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LANGUAGE TOGGLE (Phase 1: just button, full i18n in Phase 5)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function toggleLang(){
+  _lang = _lang === 'hi' ? 'en' : 'hi';
+  localStorage.setItem('mp_lang', _lang);
+  applyLang();
+}
+function applyLang(){
+  const btn = $('langToggleBtn');
+  if(btn) btn.textContent = _lang === 'hi' ? 'EN' : 'हि';
+
+  // Sync row
+  const syncLbl = $('syncLabel');
+  if(syncLbl) syncLbl.textContent = _lang === 'en'
+    ? '🔄 Live Sync · Last Update:'
+    : '🔄 लाइव सिंक · अंतिम अपडेट:';
+
+  const learnTitle = $('learnBarTitle');
+  if(learnTitle) learnTitle.textContent = _lang === 'en' ? 'Learn & Grow' : 'सीखें & Grow करें';
+}
+applyLang();
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SCREEN ROUTING
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function showScreen(name){
+  ['phoneScreen','otpScreen','registerScreen','pendingScreen','paywallScreen']
+    .forEach(s => hide(s));
+  if(name) show(name);
+}
+function showAuth(){
+  hide('loadingScreen');
+  hide('appView');
+  show('authView');
+  showScreen('phoneScreen');
+}
+function showApp(){
+  hide('loadingScreen');
+  hide('authView');
+  show('appView');
+
+  // Hide all role views
+  document.querySelectorAll('.role-view').forEach(el => el.style.display = 'none');
+
+  if(SESSION.role === 'admin'){
+    show('adminDashboard');
+    renderAdminDashboard();
+  } else if(SESSION.role === 'manager'){
+    show('managerDashboard');
+    renderManagerDashboard();
+  } else if(SESSION.role === 'member'){
+    show('memberDashboard');
+    renderMemberDashboard();
+  }
+
+  buildNav();
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PHONE AUTH
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function _setupRecaptcha(){
+  if(_recaptchaVerifier) return _recaptchaVerifier;
+  _recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptchaContainer', {size:'invisible'});
+  return _recaptchaVerifier;
+}
+
+async function sendOtp(){
+  const phoneRaw = $('phoneInput').value.trim().replace(/\D/g,'');
+  if(phoneRaw.length !== 10){ toast('⚠️ Enter valid 10-digit mobile'); return; }
+  const phoneE164 = '+91' + phoneRaw;
+
+  const btn = $('sendOtpBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  try{
+    const verifier = _setupRecaptcha();
+    _confirmationResult = await _fbAuth.signInWithPhoneNumber(phoneE164, verifier);
+    SESSION.phone = phoneE164;
+    $('otpPhoneLbl').textContent = phoneE164;
+    showScreen('otpScreen');
+    $('otpInput').focus();
+    _startOtpTimer();
+    toast('📩 OTP sent');
+  }catch(e){
+    console.error('sendOtp:', e);
+    let msg = '❌ Failed to send OTP';
+    if(e.code === 'auth/invalid-phone-number') msg = '❌ Invalid number';
+    else if(e.code === 'auth/too-many-requests') msg = '❌ Too many attempts';
+    else if(e.code === 'auth/quota-exceeded') msg = '❌ SMS quota exceeded';
+    else if(e.message) msg = '❌ ' + e.message.slice(0,80);
+    toast(msg);
+    try{ _recaptchaVerifier?.clear(); }catch(_){}
+    _recaptchaVerifier = null;
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = 'Send OTP';
+  }
+}
+
+async function verifyOtp(){
+  const code = $('otpInput').value.trim();
+  if(code.length !== 6){ toast('⚠️ Enter 6-digit OTP'); return; }
+  if(!_confirmationResult){ toast('❌ Session expired'); backToPhone(); return; }
+
+  const btn = $('verifyOtpBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  try{
+    const result = await _confirmationResult.confirm(code);
+    SESSION.uid = result.user.uid;
+    SESSION.phone = result.user.phoneNumber;
+    await routeAuthenticatedUser();
+  }catch(e){
+    console.error('verifyOtp:', e);
+    toast(e.code === 'auth/invalid-verification-code' ? '❌ Wrong OTP' : '❌ Failed');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = 'Verify & Continue';
+  }
+}
+
+function backToPhone(){
+  $('otpInput').value = '';
+  _confirmationResult = null;
+  if(_otpResendTimer){ clearInterval(_otpResendTimer); _otpResendTimer = null; }
+  showScreen('phoneScreen');
+}
+
+function _startOtpTimer(){
+  let secs = 30;
+  const lbl = $('otpTimer');
+  if(_otpResendTimer) clearInterval(_otpResendTimer);
+  const tick = () => {
+    if(secs <= 0){ lbl.textContent=''; clearInterval(_otpResendTimer); return; }
+    lbl.textContent = `Resend in ${secs}s`;
+    secs--;
+  };
+  tick();
+  _otpResendTimer = setInterval(tick, 1000);
+}
+
+function _phoneKey(phone){ return phone.replace(/[^\d]/g,''); }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ROUTING POST-AUTH
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function routeAuthenticatedUser(){
+  // Super admin check
+  if(SESSION.phone === SUPER_ADMIN_PHONE){
+    SESSION.role = 'admin';
+    SESSION.userData = { name:'Super Admin', phone:SESSION.phone };
+    showApp();
+    return;
+  }
+
+  const phoneKey = _phoneKey(SESSION.phone);
+  const userSnap = await _fbDb.ref('users/' + phoneKey).get();
+
+  if(userSnap.exists()){
+    const u = userSnap.val();
+    SESSION.userData = u;
+    SESSION.role = u.role;
+    SESSION.companyId = u.companyId;
+
+    if(u.status === 'pending'){
+      $('pendingName').textContent = u.name || '—';
+      $('pendingCompany').textContent = u.companyName || '—';
+      $('pendingDate').textContent = u.requestedAt
+        ? 'Requested: ' + new Date(u.requestedAt).toLocaleDateString()
+        : '';
+      hide('appView'); show('authView'); hide('loadingScreen');
+      showScreen('pendingScreen');
+      return;
+    }
+    if(u.status === 'suspended' || u.status === 'expired'){
+      hide('appView'); show('authView'); hide('loadingScreen');
+      showScreen('paywallScreen');
+      return;
+    }
+    if(u.role === 'manager' && u.plan === 'trial' && u.trialEnd && Date.now() > u.trialEnd){
+      await _fbDb.ref('users/' + phoneKey + '/status').set('expired');
+      hide('appView'); show('authView'); hide('loadingScreen');
+      showScreen('paywallScreen');
+      return;
+    }
+    if(u.companyId){
+      const cSnap = await _fbDb.ref('companies/' + u.companyId + '/info').get();
+      SESSION.companyData = cSnap.val();
+    }
+    showApp();
+  } else {
+    hide('appView'); show('authView'); hide('loadingScreen');
+    showScreen('registerScreen');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MANAGER REGISTRATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function submitRegistration(){
+  const name = $('regName').value.trim();
+  const companyName = $('regCompanyName').value.trim();
+  const companyType = $('regCompanyType').value;
+  const numMet = parseInt($('regNumMet').value) || 0;
+  const numSlit = parseInt($('regNumSlit').value) || 0;
+  const plantLocation = $('regPlantLocation').value.trim();
+  const empCode = $('regEmpCode').value.trim();
+  const designation = $('regDesignation').value.trim();
+
+  if(!name){ toast('⚠️ Enter your name'); return; }
+  if(!companyName){ toast('⚠️ Enter company name'); return; }
+  if(!companyType){ toast('⚠️ Select operation type'); return; }
+  if(!plantLocation){ toast('⚠️ Enter plant location'); return; }
+  if(!empCode){ toast('⚠️ Enter your employee code'); return; }
+  if(!designation){ toast('⚠️ Enter designation'); return; }
+  if(numMet === 0 && numSlit === 0){ toast('⚠️ Enter at least 1 metalliser or slitter'); return; }
+
+  const companyId = companyName.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,30)
+    + '_' + Date.now().toString(36).slice(-6);
+
+  const phoneKey = _phoneKey(SESSION.phone);
+  const now = Date.now();
+  const trialEnd = now + (TRIAL_DAYS * 86400000);
+
+  const userRecord = {
+    name, phone:SESSION.phone, role:'manager',
+    companyId, companyName, companyType,
+    numMetallisers:numMet, numSlitters:numSlit, plantLocation,
+    empCode, designation,
+    status:'pending', plan:'trial',
+    trialStart:now, trialEnd, requestedAt:now
+  };
+
+  const companyRecord = {
+    name:companyName, type:companyType,
+    ownerPhone:SESSION.phone, ownerName:name,
+    plantLocation, numMetallisers:numMet, numSlitters:numSlit,
+    createdAt:now, plan:'trial', trialEnd, status:'pending'
+  };
+
+  try{
+    const updates = {};
+    updates['users/' + phoneKey] = userRecord;
+    updates['companies/' + companyId + '/info'] = companyRecord;
+    await _fbDb.ref().update(updates);
+
+    SESSION.userData = userRecord;
+    SESSION.companyId = companyId;
+
+    // Build admin WhatsApp link
+    const adminMsg = `📥 *New MetPower Registration*\n\n` +
+      `Name: ${name}\nCompany: ${companyName}\nType: ${companyType}\n` +
+      `Phone: ${SESSION.phone}\nLocation: ${plantLocation}\n` +
+      `Metallisers: ${numMet} · Slitters: ${numSlit}\n` +
+      `Designation: ${designation}\n\nReview & approve.`;
+    console.log('Admin WhatsApp:', `https://wa.me/91${SUPER_ADMIN_WHATSAPP}?text=${encodeURIComponent(adminMsg)}`);
+
+    $('pendingName').textContent = name;
+    $('pendingCompany').textContent = companyName;
+    $('pendingDate').textContent = 'Requested: ' + new Date(now).toLocaleDateString();
+    showScreen('pendingScreen');
+    toast('✅ Registration submitted!');
+  }catch(e){
+    console.error('Reg error:', e);
+    toast('❌ Failed: ' + (e.message || 'try again'));
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LOGOUT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function logout(){
+  try{ await _fbAuth.signOut(); }catch(_){}
+  Object.keys(SESSION).forEach(k => SESSION[k] = null);
+  if(_recaptchaVerifier){ try{_recaptchaVerifier.clear();}catch(_){}; _recaptchaVerifier=null; }
+  if(_otpResendTimer){ clearInterval(_otpResendTimer); _otpResendTimer = null; }
+  _confirmationResult = null;
+  $('phoneInput').value = '';
+  $('otpInput').value = '';
+  showAuth();
+}
+
+function contactAdmin(){
+  const msg = `Hi, I want to upgrade my MetPower subscription.\n\nPhone: ${SESSION.phone}\nCompany: ${SESSION.userData?.companyName || ''}`;
+  window.open(`https://wa.me/91${SUPER_ADMIN_WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// NAV BUILDER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function buildNav(){
+  const ALL_TABS = [
+    {id:'home',     ico:'🏠', lbl:'Home',     roles:['admin','manager','member']},
+    {id:'schedule', ico:'📅', lbl:'Schedule', roles:['manager','member']},
+    {id:'leave',    ico:'🏖️', lbl:'Leave',    roles:['manager','member']},
+    {id:'reports',  ico:'📋', lbl:'Reports',  roles:['manager','member']},
+    {id:'team',     ico:'👥', lbl:'Team',     roles:['manager']}
+  ];
+  const tabs = ALL_TABS.filter(t => t.roles.includes(SESSION.role || 'admin'));
+
+  // Mobile bottom nav
+  const nav = $('mainNav');
+  nav.innerHTML = tabs.map((t,i)=>`
+    <button class="nb${i===0?' on':''}" id="nb-${t.id}" onclick="goTab('${t.id}')">
+      <span class="nb-ico">${t.ico}</span>${t.lbl}
+    </button>`).join('');
+
+  // PC sidebar
+  const pcNav = $('pcNav');
+  pcNav.innerHTML = tabs.map((t,i)=>`
+    <button class="pc-nav-btn${i===0?' on':''}" id="pc-nb-${t.id}" onclick="goTab('${t.id}')">
+      <span class="pc-nav-ico">${t.ico}</span><span>${t.lbl}</span>
+    </button>`).join('');
+}
+
+function goTab(t){
+  _currentTab = t;
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('on'));
+  $('tab-' + t)?.classList.add('on');
+  document.querySelectorAll('.nb').forEach(b => b.classList.remove('on'));
+  $('nb-' + t)?.classList.add('on');
+  document.querySelectorAll('.pc-nav-btn').forEach(b => b.classList.remove('on'));
+  $('pc-nb-' + t)?.classList.add('on');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LEARN & GROW
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function openLearn(){ $('learnScreen').classList.add('show'); }
+function closeLearn(){ $('learnScreen').classList.remove('show'); }
+
+function openIframe(src, title){
+  $('iframeTitle').textContent = title;
+  $('iframeBody').src = src;
+  $('iframeOverlay').classList.add('show');
+}
+function closeIframe(){
+  $('iframeOverlay').classList.remove('show');
+  setTimeout(() => $('iframeBody').src = 'about:blank', 300);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ADMIN DASHBOARD
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _adminTab = 'pending';
+let _adminUsers = {};
+
+async function renderAdminDashboard(){
+  _fbDb.ref('users').on('value', snap => {
+    _adminUsers = snap.val() || {};
+    _renderAdminContent();
+  });
+}
+
+function _renderAdminContent(){
+  const all = Object.entries(_adminUsers).map(([k,v]) => ({phoneKey:k, ...v}))
+    .filter(u => u.role === 'manager');
+
+  const pending = all.filter(u => u.status === 'pending');
+  const active  = all.filter(u => u.status === 'active');
+  const trials  = active.filter(u => u.plan === 'trial' && u.trialEnd > Date.now());
+
+  $('statTotalCompanies').textContent = all.length;
+  $('statPending').textContent = pending.length;
+  $('statActive').textContent = active.length;
+  $('statTrials').textContent = trials.length;
+
+  let visible;
+  if(_adminTab === 'pending') visible = pending;
+  else if(_adminTab === 'active') visible = active;
+  else visible = all;
+
+  ['pending','active','all'].forEach(name => {
+    const btn = $('tabBtn-' + name);
+    if(btn) btn.style.opacity = (_adminTab === name ? '1' : '.55');
+  });
+
+  const cont = $('adminContent');
+  if(!visible.length){
+    cont.innerHTML = '<div class="empty"><div class="empty-ico">📭</div><div>No companies in this category</div></div>';
+    return;
+  }
+
+  cont.innerHTML = visible.map(u => {
+    const trialDays = u.trialEnd ? Math.max(0, Math.ceil((u.trialEnd - Date.now()) / 86400000)) : 0;
+    const reqDate = u.requestedAt ? new Date(u.requestedAt).toLocaleDateString() : '—';
+    const statusBadge = `<span class="badge ${u.status}">${u.status}</span>`;
+    const planBadge = u.plan === 'trial'
+      ? `<span class="badge trial" style="margin-left:6px">Trial · ${trialDays}d</span>`
+      : '';
+
+    return `<div class="card">
+      <div class="card-row">
+        <div style="flex:1;min-width:0">
+          <div class="card-name">${_esc(u.name||'—')}</div>
+          <div class="card-sub">🏭 ${_esc(u.companyName||'—')}</div>
+          <div style="font-size:11px;color:var(--muted2);margin-top:4px;line-height:1.6">
+            📱 ${_esc(u.phone)} · ${_esc(u.designation||'')}<br>
+            📍 ${_esc(u.plantLocation||'')} · ${_esc(u.companyType||'')}<br>
+            🏭 ${u.numMetallisers||0} Metallisers · ✂️ ${u.numSlitters||0} Slitters · Code: ${_esc(u.empCode||'')}
+          </div>
+          <div style="margin-top:8px">${statusBadge}${planBadge}</div>
+        </div>
+      </div>
+      <div class="act-row">
+        ${u.status==='pending' ? `
+          <button class="act-btn green" onclick="approveManager('${u.phoneKey}')">✅ Approve</button>
+          <button class="act-btn red" onclick="rejectManager('${u.phoneKey}')">❌ Reject</button>
+        ` : ''}
+        ${u.status==='active' ? `
+          <button class="act-btn" onclick="extendTrial('${u.phoneKey}')">⏳ Extend</button>
+          <button class="act-btn red" onclick="suspendManager('${u.phoneKey}')">⏸ Suspend</button>
+        ` : ''}
+        ${u.status==='suspended' ? `
+          <button class="act-btn green" onclick="reactivateManager('${u.phoneKey}')">▶ Reactivate</button>
+        ` : ''}
+        <button class="act-btn" onclick="viewCompanyDetails('${u.phoneKey}')">👁 Details</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted2);margin-top:8px">Requested: ${reqDate}</div>
+    </div>`;
+  }).join('');
+}
+
+function showAdminTab(tab){ _adminTab = tab; _renderAdminContent(); }
+
+async function approveManager(phoneKey){
+  try{
+    const u = _adminUsers[phoneKey];
+    if(!u) return;
+    const updates = {};
+    updates['users/' + phoneKey + '/status'] = 'active';
+    if(u.companyId) updates['companies/' + u.companyId + '/info/status'] = 'active';
+    await _fbDb.ref().update(updates);
+    toast('✅ ' + u.name + ' approved');
+
+    // Open WhatsApp to notify them
+    const msg = `🎉 Congratulations ${u.name}!\n\nYour MetPower account has been approved. You can now log in:\n\nhttps://metpower.vkstech.com\n\nYour 30-day free trial starts now.`;
+    setTimeout(() => {
+      if(confirm('Send WhatsApp to ' + u.name + '?')){
+        window.open(`https://wa.me/${u.phone.replace('+','')}?text=${encodeURIComponent(msg)}`, '_blank');
+      }
+    }, 500);
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+async function rejectManager(phoneKey){
+  if(!confirm('Reject this registration? Records will be deleted.')) return;
+  try{
+    const u = _adminUsers[phoneKey];
+    const updates = {};
+    updates['users/' + phoneKey] = null;
+    if(u?.companyId) updates['companies/' + u.companyId] = null;
+    await _fbDb.ref().update(updates);
+    toast('❌ Registration rejected');
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+async function extendTrial(phoneKey){
+  const days = prompt('Extend trial by how many days?', '30');
+  if(!days || isNaN(days)) return;
+  try{
+    const u = _adminUsers[phoneKey];
+    const newEnd = (u.trialEnd > Date.now() ? u.trialEnd : Date.now()) + (parseInt(days)*86400000);
+    const updates = {};
+    updates['users/' + phoneKey + '/trialEnd'] = newEnd;
+    if(u.companyId) updates['companies/' + u.companyId + '/info/trialEnd'] = newEnd;
+    await _fbDb.ref().update(updates);
+    toast('⏳ Trial extended by ' + days + ' days');
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+async function suspendManager(phoneKey){
+  if(!confirm('Suspend this manager?')) return;
+  try{
+    await _fbDb.ref('users/' + phoneKey + '/status').set('suspended');
+    toast('⏸ Suspended');
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+async function reactivateManager(phoneKey){
+  try{
+    await _fbDb.ref('users/' + phoneKey + '/status').set('active');
+    toast('▶ Reactivated');
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+function viewCompanyDetails(phoneKey){
+  const u = _adminUsers[phoneKey];
+  if(!u) return;
+  openModal(`
+    <div class="modal-handle"></div>
+    <div class="modal-title">${_esc(u.companyName)}</div>
+    <div class="modal-sub">${_esc(u.companyType)}</div>
+
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Owner</div>
+      <div style="font-weight:800">${_esc(u.name)}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:2px">${_esc(u.designation||'')}</div>
+      <div style="font-size:13px;color:var(--muted)">📱 ${_esc(u.phone)}</div>
+    </div>
+
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Plant</div>
+      <div style="font-weight:800">📍 ${_esc(u.plantLocation||'—')}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:2px">
+        🏭 ${u.numMetallisers||0} Metallisers · ✂️ ${u.numSlitters||0} Slitters
+      </div>
+    </div>
+
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Plan &amp; Trial</div>
+      <div style="font-weight:800">${u.plan || 'trial'}</div>
+      ${u.trialEnd ? `<div style="font-size:13px;color:var(--muted);margin-top:2px">
+        Trial ends: ${new Date(u.trialEnd).toLocaleDateString()}
+      </div>` : ''}
+    </div>
+
+    <button class="btn-secondary" onclick="closeModal()">Close</button>
+  `);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MANAGER / MEMBER DASHBOARDS (Phase 1 placeholders)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function renderManagerDashboard(){
+  const u = SESSION.userData;
+  const c = SESSION.companyData;
+  $('mgrCompanyName').textContent = c?.name || u.companyName || '—';
+  $('mgrCompanyMeta').textContent = (c?.type || '') + ' · ' + u.designation;
+
+  $('mgrTotalEmps').textContent = '0';
+  $('mgrSections').textContent = '0';
+  if(u.trialEnd){
+    const days = Math.max(0, Math.ceil((u.trialEnd - Date.now()) / 86400000));
+    $('mgrTrialDays').textContent = days;
+  }
+}
+
+function renderMemberDashboard(){
+  $('memberName').textContent = SESSION.userData.name || '—';
+  $('memberMeta').textContent = SESSION.companyData?.name || '';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROFILE MODAL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function openProfile(){
+  const u = SESSION.userData || {};
+  openModal(`
+    <div class="modal-handle"></div>
+    <div class="modal-title">Profile</div>
+
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Name</div>
+      <div style="font-weight:800">${_esc(u.name||'—')}</div>
+    </div>
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Phone</div>
+      <div style="font-weight:800">${_esc(u.phone || SESSION.phone || '—')}</div>
+    </div>
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Role</div>
+      <div style="font-weight:800">${_esc(SESSION.role||'—').toUpperCase()}</div>
+    </div>
+    ${u.companyName ? `
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">Company</div>
+      <div style="font-weight:800">${_esc(u.companyName)}</div>
+      <div style="font-size:13px;color:var(--muted)">📍 ${_esc(u.plantLocation||'')}</div>
+      <div style="font-size:13px;color:var(--muted)">${_esc(u.companyType||'')}</div>
+    </div>` : ''}
+
+    <div class="card" style="background:var(--card)">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Legal</div>
+      <a href="privacy.html" target="_blank" style="display:block;padding:6px 0;font-size:13px;color:var(--primary);text-decoration:none">📄 Privacy Policy</a>
+      <a href="terms.html" target="_blank" style="display:block;padding:6px 0;font-size:13px;color:var(--primary);text-decoration:none">📜 Terms of Service</a>
+      <a href="delete-account.html" target="_blank" style="display:block;padding:6px 0;font-size:13px;color:var(--primary);text-decoration:none">🗑️ Account Deletion Info</a>
+    </div>
+
+    <button class="btn-secondary" onclick="closeModal()">Close</button>
+    <button class="btn-secondary" onclick="closeModal();logout()" style="margin-top:8px">⏻ Logout</button>
+    <button onclick="initDeleteAccount()" style="width:100%;padding:13px;border-radius:12px;
+      border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.08);
+      color:var(--red);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:10px">
+      🗑️ Delete My Account
+    </button>
+    <div style="text-align:center;font-size:10px;color:var(--muted2);margin-top:14px">
+      MetPower v${APP_VERSION} · ShiftIQ Family
+    </div>
+  `);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DELETE ACCOUNT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function initDeleteAccount(){
+  closeModal();
+  const isMgr = SESSION.role === 'manager';
+  const warning = isMgr
+    ? `⚠️ <b>Warning</b>: Deleting your account will <b>permanently delete all company data</b>:
+        <br>• All employees, schedules, leaves, reports
+        <br>• Your company workspace
+        <br>• All team members lose access<br><br>
+        This cannot be undone.`
+    : `⚠️ Your account will be removed and you'll lose access to MetPower. This cannot be undone.`;
+
+  openModal(`
+    <div class="modal-handle"></div>
+    <div class="modal-title" style="color:var(--red)">🗑️ Delete Account</div>
+    <div class="card" style="background:rgba(239,68,68,.06);border-color:rgba(239,68,68,.3)">
+      <div style="font-size:13px;line-height:1.6">${warning}</div>
+    </div>
+    <div class="field">
+      <label>To confirm, type <b style="color:var(--red)">DELETE</b> below</label>
+      <input type="text" id="delConfirmInput" placeholder="Type DELETE" autocomplete="off">
+    </div>
+    <button onclick="confirmDeleteAccount()" style="width:100%;padding:14px;border-radius:12px;
+      border:none;background:var(--red);color:#fff;font-size:15px;font-weight:800;
+      font-family:inherit;cursor:pointer">Delete My Account Permanently</button>
+    <button class="btn-secondary" onclick="closeModal()" style="margin-top:10px">Cancel</button>
+  `);
+}
+
+async function confirmDeleteAccount(){
+  if($('delConfirmInput').value.trim().toUpperCase() !== 'DELETE'){
+    toast('⚠️ Type DELETE in capitals'); return;
+  }
+  try{
+    const phoneKey = _phoneKey(SESSION.phone);
+    const updates = {};
+    updates['users/' + phoneKey] = null;
+    if(SESSION.role === 'manager' && SESSION.companyId){
+      updates['companies/' + SESSION.companyId] = null;
+    }
+    await _fbDb.ref().update(updates);
+    try{ await _fbAuth.currentUser?.delete(); }catch(_){}
+    toast('🗑️ Account deleted');
+    closeModal();
+    setTimeout(logout, 1500);
+  }catch(e){ toast('❌ ' + e.message); }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AUTH STATE LISTENER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_fbAuth?.onAuthStateChanged(async user => {
+  if(user && user.phoneNumber){
+    SESSION.uid = user.uid;
+    SESSION.phone = user.phoneNumber;
+    try{ await routeAuthenticatedUser(); }
+    catch(e){ console.error('Auto-route failed:', e); showAuth(); }
+  } else {
+    showAuth();
+  }
+});
+
+setTimeout(()=>{
+  if($('loadingScreen').style.display !== 'none' && !SESSION.uid){
+    showAuth();
+  }
+}, 4000);
+
+// Input handlers
+$('phoneInput').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();sendOtp();} });
+$('phoneInput').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g,'').slice(0,10); });
+$('otpInput').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();verifyOtp();} });
+$('otpInput').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g,'').slice(0,6); });
+
+// Sync time updater
+function updateSyncTime(){
+  const el = $('syncTime');
+  if(el){
+    const now = new Date();
+    el.textContent = now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}).toLowerCase();
+  }
+}
+setInterval(updateSyncTime, 60000);
+updateSyncTime();
+
+console.log('%c MetPower ', 'background:#f97316;color:#fff;font-weight:bold;padding:4px 10px;border-radius:4px',
+  ' v' + APP_VERSION + ' loaded');
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SERVICE WORKER + PWA INSTALL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('[SW] Registered'))
+      .catch(err => console.warn('[SW] Failed:', err));
+  });
+}
+
+let _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredPrompt = e;
+});
+window.installApp = async function(){
+  if(!_deferredPrompt){ toast('Install option not available'); return; }
+  _deferredPrompt.prompt();
+  const choice = await _deferredPrompt.userChoice;
+  if(choice.outcome === 'accepted') toast('🎉 App installed!');
+  _deferredPrompt = null;
+};
+</script>
+</body>
+</html>
