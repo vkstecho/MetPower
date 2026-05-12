@@ -1,1 +1,8 @@
-
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.vkstech.metpower",
+        "sha256_cert_fingerprints": ["D8:8B:AE:14:65:F2:AF:4D:48:85:E4:54:42:DA:FD:5D:7A:E2:E0:8D:4A:EF:DE:D4:86:37:69:8C:F7:36:9C:FD"]
+      }
+    }]
