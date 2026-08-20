@@ -1,135 +1,76 @@
-/**
- * MetPower — Service Worker
- *
- * Strategy:
- *   • App shell (index.html, manifest, icons) → cache-first
- *   • Iframe content (Met Train PRO, MetCost, MRM, Time Study, SupSkill) → cache-first with revalidation
- *   • Firebase API → never cache
- *   • External CDN → stale-while-revalidate
- */
+// GLS MET Power — Service Worker
+// AUTO-VERSION: changes on every deploy via BUILD_TIME injected in index.html
+// Strategy: Network-First for HTML (always fresh), Cache-First for assets
 
-const SW_VERSION    = 'metpower-v0.1.0';
-const STATIC_CACHE  = `${SW_VERSION}-static`;
-const RUNTIME_CACHE = `${SW_VERSION}-runtime`;
+const SW_VERSION = 'glsmp-v5';
+const INTEGRITY_CACHE = 'glsmp-integrity'; // Never deleted — holds session-integrity token
 
-const APP_SHELL = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png'
-];
-
-const NEVER_CACHE_DOMAINS = [
-  'firebaseio.com',
-  'firebasedatabase.app',
-  'googleapis.com',
-  'identitytoolkit.googleapis.com',
-  'securetoken.googleapis.com',
-  'google.com/recaptcha'
-];
-
-const RUNTIME_DOMAINS = [
-  'gstatic.com',
-  'cdnjs.cloudflare.com',
-  'fonts.googleapis.com',
-  'fonts.gstatic.com'
-];
-
-// ─────────────────────────────────────────────
-// INSTALL
-// ─────────────────────────────────────────────
-self.addEventListener('install', event => {
-  console.log('[SW] Installing', SW_VERSION);
-  event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then(cache => cache.addAll(APP_SHELL).catch(err => {
-        console.warn('[SW] Some shell files not cached:', err.message);
-      }))
+// ── Install: write integrity token to protected cache ──
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(INTEGRITY_CACHE)
+      .then(cache => cache.put(
+        '/integrity-token',
+        new Response(SW_VERSION, { headers: { 'Content-Type': 'text/plain' } })
+      ))
       .then(() => self.skipWaiting())
   );
 });
 
-// ─────────────────────────────────────────────
-// ACTIVATE
-// ─────────────────────────────────────────────
-self.addEventListener('activate', event => {
-  console.log('[SW] Activating', SW_VERSION);
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(key => !key.startsWith(SW_VERSION))
-            .map(key => {
-              console.log('[SW] Deleting old cache:', key);
-              return caches.delete(key);
-            })
-      )
-    ).then(() => self.clients.claim())
+// ── Activate: delete old versioned caches, but KEEP integrity cache ──
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys
+          .filter(k => k !== INTEGRITY_CACHE && k !== SW_VERSION) // keep integrity + current
+          .map(k => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
   );
 });
 
-// ─────────────────────────────────────────────
-// FETCH
-// ─────────────────────────────────────────────
-self.addEventListener('fetch', event => {
-  const req = event.request;
-  if(req.method !== 'GET') return;
+// ── Fetch: NETWORK FIRST for everything ──
+// Never serve stale HTML — always fetch fresh from server
+self.addEventListener('fetch', e => {
+  const url = e.request.url;
 
-  const url = new URL(req.url);
+  // Pass through: Firebase, Google, Anthropic, non-GET
+  if (
+    e.request.method !== 'GET' ||
+    url.includes('firebaseio.com') ||
+    url.includes('googleapis.com') ||
+    url.includes('anthropic.com') ||
+    url.includes('gstatic.com') ||
+    url.includes('firebase') ||
+    url.startsWith('chrome-extension')
+  ) return;
 
-  // 1. NEVER cache Firebase
-  if(NEVER_CACHE_DOMAINS.some(d => url.hostname.includes(d))) return;
-
-  // 2. App shell + iframe content (same origin) → cache-first
-  if(url.origin === self.location.origin){
-    event.respondWith(
-      caches.match(req).then(cached => {
-        if(cached){
-          // Background revalidate iframe content (so updates are picked up)
-          if(url.pathname.endsWith('.html') && url.pathname !== '/index.html'){
-            fetch(req).then(res => {
-              if(res.ok) caches.open(STATIC_CACHE).then(c => c.put(req, res));
-            }).catch(()=>{});
-          }
-          return cached;
+  e.respondWith(
+    fetch(e.request, { cache: 'no-cache' })  // always ask server for fresh copy
+      .then(res => {
+        if (res.ok && res.status === 200) {
+          const clone = res.clone();
+          caches.open(SW_VERSION).then(c => c.put(e.request, clone));
         }
-        return fetch(req).then(res => {
-          if(res.ok && res.status === 200){
-            const copy = res.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(req, copy));
-          }
-          return res;
-        }).catch(() => {
-          if(req.mode === 'navigate'){
-            return caches.match('./index.html');
-          }
-          return new Response('Offline', { status: 503 });
-        });
+        return res;
       })
-    );
-    return;
-  }
-
-  // 3. CDN → stale-while-revalidate
-  if(RUNTIME_DOMAINS.some(d => url.hostname.includes(d))){
-    event.respondWith(
-      caches.open(RUNTIME_CACHE).then(cache =>
-        cache.match(req).then(cached => {
-          const fetchPromise = fetch(req).then(res => {
-            if(res.ok) cache.put(req, res.clone());
-            return res;
-          }).catch(() => cached);
-          return cached || fetchPromise;
-        })
+      .catch(() =>
+        caches.match(e.request)
+          .then(r => r || new Response(
+            `<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0a0a0e;color:#fff">
+              <div style="font-size:48px;margin-bottom:16px">📡</div>
+              <h2 style="color:#f97316">No Internet</h2>
+              <p style="color:#64748b">Internet connection check करें और reload करें</p>
+              <button onclick="location.reload()" style="background:#f97316;border:none;color:#fff;padding:12px 24px;border-radius:10px;font-size:16px;cursor:pointer;margin-top:16px">🔄 Reload</button>
+            </body></html>`,
+            { status: 503, headers: { 'Content-Type': 'text/html' } }
+          ))
       )
-    );
-    return;
-  }
+  );
 });
 
-self.addEventListener('message', event => {
-  if(event.data === 'SKIP_WAITING') self.skipWaiting();
-  if(event.data === 'CLEAR_CACHE'){
-    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-  }
+// ── Message: force reload all clients ──
+self.addEventListener('message', e => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
