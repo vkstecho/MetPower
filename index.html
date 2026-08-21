@@ -2058,11 +2058,13 @@ setTimeout(_forceLogin, 10000);
         <input class="inp-field" type="tel" id="loginMobile" placeholder="10 अंकों का Mobile"
           inputmode="numeric" maxlength="10"
           oninput="this.value=this.value.replace(/[^0-9]/g,'');_onMobileInput(this.value)"
-          onkeydown="if(event.key==='Enter')_sendOTP()"
+          onkeyup="_onMobileInput(this.value.replace(/[^0-9]/g,''))"
+          onpaste="setTimeout(()=>{this.value=this.value.replace(/[^0-9]/g,'').slice(0,10);_onMobileInput(this.value)},10)"
+          onkeydown="if(event.key==='Enter'&&this.value.length===10)_sendOTP()"
           style="flex:1;font-size:18px;letter-spacing:2px">
       </div>
       <div id="recaptcha-inline" style="margin-bottom:10px;display:flex;justify-content:center"></div>
-      <button class="big-btn" id="sendOtpBtn" onclick="_sendOTP()" disabled style="opacity:.5">OTP भेजें &#128172;</button>
+      <button class="big-btn" id="sendOtpBtn" onclick="_sendOTP()" disabled style="opacity:.5;pointer-events:none;transition:opacity .2s">OTP भेजें &#128172;</button>
       <div style="text-align:center;margin-top:16px">
         <span style="font-size:12px;color:var(--muted2)">Admin हैं? </span>
         <span onclick="showAdminLogin()" style="font-size:12px;color:var(--m1);font-weight:700;cursor:pointer">Admin Login &rarr;</span>
@@ -4900,7 +4902,13 @@ let _loginMobile='', _loginConfirmResult=null, _otpResendInterval=null;
 
 function _onMobileInput(val){
   const btn=document.getElementById('sendOtpBtn');
-  if(btn){ const ok=val.length===10; btn.disabled=!ok; btn.style.opacity=ok?'1':'.5'; }
+  if(btn){
+    const ok=val.length===10;
+    btn.disabled=!ok;
+    btn.style.opacity=ok?'1':'.5';
+    btn.style.pointerEvents=ok?'auto':'none';
+    btn.style.cursor=ok?'pointer':'not-allowed';
+  }
 }
 function _onOtpInput(val){
   const btn=document.getElementById('verifyOtpBtn');
@@ -4917,7 +4925,6 @@ async function _sendOTP(isResend){
   if(errEl) errEl.textContent='';
   try{
     if(!window._fbRecaptchaNew||isResend){
-      try{ if(window._fbRecaptchaNew) window._fbRecaptchaNew.clear(); }catch(e){}
       window._fbRecaptchaNew=new RecaptchaVerifier(auth,'recaptcha-container',{size:'invisible'});
     }
     toast('OTP भेजा जा रहा है...');
