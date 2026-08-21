@@ -3500,7 +3500,7 @@ async function initAdminAuth(){
 
 // ── CONFIG ──
 const CFG = {
-  license:   { expiry: new Date(2026,11,31), warnDays:15, masterKey:'45edc2356764c728add613126ab4c53d14f9339a238b2393d56f84292d5ce319', extendKey:'5dfd85eda291bef92f908b4cfa61bb62283afdaa3a947a8688eb8dcb6c330e65', extendTo: new Date(2026,11,31) },
+  license:   { expiry: new Date(2026,11,31), warnDays:15, masterKey:'45edc2356764c728add613126ab4c53d14f9339a238b2393d56f84292d5ce319', extendKey:'5dfd85eda291bef92f908b4cfa61bb62283afdaa3a947a8688eb8dcb6c330e65', extendTo: new Date(2027,11,31) },
   // SECURITY: Admin credentials checked ONLY via Firebase adminAuth — not hardcoded
   adminCreds:[], // Empty — all auth goes through Firebase
   supervisorInstructor: 'MOHIT',
@@ -4917,7 +4917,8 @@ async function _sendOTP(isResend){
   if(errEl) errEl.textContent='';
   try{
     if(!window._fbRecaptchaNew||isResend){
-      window._fbRecaptchaNew=new RecaptchaVerifier(auth,'recaptcha-inline',{size:'invisible'});
+      try{ if(window._fbRecaptchaNew) window._fbRecaptchaNew.clear(); }catch(e){}
+      window._fbRecaptchaNew=new RecaptchaVerifier(auth,'recaptcha-container',{size:'invisible'});
     }
     toast('OTP भेजा जा रहा है...');
     _loginConfirmResult=await signInWithPhoneNumber(auth,fullPhone,window._fbRecaptchaNew);
