@@ -1,76 +1,79 @@
-// MetPower — Service Worker
-// AUTO-VERSION: changes on every deploy via BUILD_TIME injected in index.html
-// Strategy: Network-First for HTML (always fresh), Cache-First for assets
+// MetPower — Optimized Service Worker
+// Strategy: Stale-While-Revalidate for Assets, Network-First for HTML
 
-const SW_VERSION = 'metpower-v1';
-const INTEGRITY_CACHE = 'metpower-integrity'; // Never deleted — holds session-integrity token
+const SW_VERSION = 'metpower-v2';
+const STATIC_CACHE = 'metpower-static-v2';
+const INTEGRITY_CACHE = 'metpower-integrity';
 
-// ── Install: write integrity token to protected cache ──
+// Assets to precache for instant loading
+const ASSETS_TO_PRECACHE = [
+  './',
+  './index.html',
+  'https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800;900&family=Barlow+Condensed:wght@700;800;900&display=swap',
+  'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'
+];
+
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(INTEGRITY_CACHE)
-      .then(cache => cache.put(
+    Promise.all([
+      caches.open(STATIC_CACHE).then(cache => cache.addAll(ASSETS_TO_PRECACHE)),
+      caches.open(INTEGRITY_CACHE).then(cache => cache.put(
         '/integrity-token',
         new Response(SW_VERSION, { headers: { 'Content-Type': 'text/plain' } })
       ))
-      .then(() => self.skipWaiting())
+    ]).then(() => self.skipWaiting())
   );
 });
 
-// ── Activate: delete old versioned caches, but KEEP integrity cache ──
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys
-          .filter(k => k !== INTEGRITY_CACHE && k !== SW_VERSION) // keep integrity + current
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => k !== INTEGRITY_CACHE && k !== STATIC_CACHE && k !== SW_VERSION)
           .map(k => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+    )).then(() => self.clients.claim())
   );
 });
 
-// ── Fetch: NETWORK FIRST for everything ──
-// Never serve stale HTML — always fetch fresh from server
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // Pass through: Firebase, Google, Anthropic, non-GET
+  // Bypass for APIs and non-GET
   if (
     e.request.method !== 'GET' ||
     url.includes('firebaseio.com') ||
     url.includes('googleapis.com') ||
     url.includes('anthropic.com') ||
-    url.includes('gstatic.com') ||
-    url.includes('firebase') ||
     url.startsWith('chrome-extension')
   ) return;
 
-  e.respondWith(
-    fetch(e.request, { cache: 'no-cache' })  // always ask server for fresh copy
-      .then(res => {
-        if (res.ok && res.status === 200) {
+  // HTML: Network-First (ensure fresh content)
+  if (e.request.mode === 'navigate' || url.endsWith('.html')) {
+    e.respondWith(
+      fetch(e.request)
+        .then(res => {
           const clone = res.clone();
           caches.open(SW_VERSION).then(c => c.put(e.request, clone));
-        }
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Assets: Stale-While-Revalidate (fastest load, updates in background)
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const networked = fetch(e.request).then(res => {
+        const clone = res.clone();
+        caches.open(STATIC_CACHE).then(c => c.put(e.request, clone));
         return res;
-      })
-      .catch(() =>
-        caches.match(e.request)
-          .then(r => r || new Response(
-            `<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0a0a0e;color:#fff">
-              <div style="font-size:48px;margin-bottom:16px">📡</div>
-              <h2 style="color:#f97316">No Internet</h2>
-              <p style="color:#64748b">Internet connection check करें और reload करें</p>
-              <button onclick="location.reload()" style="background:#f97316;border:none;color:#fff;padding:12px 24px;border-radius:10px;font-size:16px;cursor:pointer;margin-top:16px">🔄 Reload</button>
-            </body></html>`,
-            { status: 503, headers: { 'Content-Type': 'text/html' } }
-          ))
-      )
+      }).catch(() => null);
+
+      return cached || networked;
+    })
   );
 });
 
-// ── Message: force reload all clients ──
 self.addEventListener('message', e => {
   if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
