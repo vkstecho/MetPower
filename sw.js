@@ -1,9 +1,9 @@
-// GLS MET Power — Service Worker
+// MetPower — Service Worker
 // AUTO-VERSION: changes on every deploy via BUILD_TIME injected in index.html
 // Strategy: Network-First for HTML (always fresh), Cache-First for assets
 
-const SW_VERSION = 'glsmp-v5';
-const INTEGRITY_CACHE = 'glsmp-integrity'; // Never deleted — holds session-integrity token
+const SW_VERSION = 'metpower-v1';
+const INTEGRITY_CACHE = 'metpower-integrity'; // Never deleted — holds session-integrity token
 
 // ── Install: write integrity token to protected cache ──
 self.addEventListener('install', e => {
