@@ -83,6 +83,8 @@
     };
     // ── Firebase Auth exposed for login/logout ──
     window._fbAuth = auth;
+    window._fbRecaptchaVerifierClass = RecaptchaVerifier;
+    window._fbSignInWithPhoneNumber = signInWithPhoneNumber;
     window._fbSignInWithToken = (token) => signInWithCustomToken(auth, token);
     window._fbSignInAnon = () => signInAnonymously(auth);
     window._fbSignOut = () => signOut(auth);
@@ -2034,6 +2036,13 @@ setTimeout(_forceLogin, 10000);
       &#127891; सीखें &mdash; Learn Now
       <span style="font-size:11px;opacity:.8;display:block;font-weight:600;margin-top:2px">Audio &amp; Video Courses &middot; &#8377;399/category</span>
     </button>
+    <div id="loginPwaBtn" onclick="triggerPWAInstall()" title="App Install करें"
+      style="display:none;align-items:center;justify-content:center;gap:8px;width:100%;max-width:360px;
+             padding:12px;margin-bottom:14px;border-radius:12px;cursor:pointer;
+             background:linear-gradient(135deg,rgba(249,115,22,.2),rgba(168,85,247,.2));
+             border:1px solid rgba(249,115,22,.4);font-size:14px;font-weight:800;color:#f97316">
+      📲 App Install करें / Download App
+    </div>
     <div style="display:flex;justify-content:center;margin-bottom:8px">
       <svg width="80" height="80" viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -4925,10 +4934,10 @@ async function _sendOTP(isResend){
   if(errEl) errEl.textContent='';
   try{
     if(!window._fbRecaptchaNew||isResend){
-      window._fbRecaptchaNew=new RecaptchaVerifier(auth,'recaptcha-container',{size:'invisible'});
+      window._fbRecaptchaNew=new window._fbRecaptchaVerifierClass(window._fbAuth,'recaptcha-container',{size:'invisible'});
     }
     toast('OTP भेजा जा रहा है...');
-    _loginConfirmResult=await signInWithPhoneNumber(auth,fullPhone,window._fbRecaptchaNew);
+    _loginConfirmResult=await window._fbSignInWithPhoneNumber(window._fbAuth,fullPhone,window._fbRecaptchaNew);
     showStep(2);
     const sentEl=document.getElementById('otpSentTo');
     if(sentEl) sentEl.textContent='+91-'+mobile+' पर OTP भेजा गया';
