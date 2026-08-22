@@ -5745,6 +5745,8 @@ function _otpValidate(){
 
 // ── OTP Rate Limiting — Firebase server-side (cannot be bypassed by clearing localStorage) ──
 // [OLD OTP system replaced by Firebase Phone Auth - see _sendOTP above]
+
+function showNewEmpRegistrationForm(code){
   let ov=document.getElementById('newRegOverlay');
   if(!ov){ov=document.createElement('div');ov.id='newRegOverlay';document.body.appendChild(ov);}
   ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#0a0f1a;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
