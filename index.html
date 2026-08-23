@@ -2147,9 +2147,37 @@ setTimeout(_forceLogin, 10000);
       <label class="inp-label">&#127970; Company का नाम *</label>
       <input class="inp-field" type="text" id="mgrCompany" placeholder="जैसे: ABC Industries" style="margin-bottom:10px">
       <label class="inp-label">&#128188; Designation *</label>
-      <input class="inp-field" type="text" id="mgrDesignation" placeholder="जैसे: Production Manager" style="margin-bottom:10px">
+      <select class="inp-field" id="mgrDesignation" style="margin-bottom:10px" onchange="_toggleOtherField('mgrDesignation','mgrDesignationOther')">
+        <option value="">-- चुनें --</option>
+        <option value="Plant Manager">Plant Manager</option>
+        <option value="Production Manager">Production Manager</option>
+        <option value="Maintenance Manager">Maintenance Manager</option>
+        <option value="Quality Manager">Quality Manager</option>
+        <option value="E&amp;I Manager">E&amp;I Manager</option>
+        <option value="Utility Manager">Utility Manager</option>
+        <option value="Store Manager">Store Manager</option>
+        <option value="HR Manager">HR Manager</option>
+        <option value="Shift Incharge">Shift Incharge</option>
+        <option value="Supervisor">Supervisor</option>
+        <option value="Others">Others (लिखें)</option>
+      </select>
+      <input class="inp-field" type="text" id="mgrDesignationOther" placeholder="अपनी Designation लिखें" style="margin-bottom:10px;display:none">
       <label class="inp-label">&#127981; Department *</label>
-      <input class="inp-field" type="text" id="mgrDepartment" placeholder="जैसे: Metalliser, Slitter" style="margin-bottom:14px">
+      <select class="inp-field" id="mgrDepartment" style="margin-bottom:10px" onchange="_toggleOtherField('mgrDepartment','mgrDepartmentOther')">
+        <option value="">-- चुनें --</option>
+        <option value="Production - Metalliser">Production - Metalliser</option>
+        <option value="Production - Slitter">Production - Slitter</option>
+        <option value="Production - Metalliser + Slitter">Production - Metalliser + Slitter</option>
+        <option value="E&amp;I">E&amp;I (Electrical &amp; Instrumentation)</option>
+        <option value="Mechanical">Mechanical</option>
+        <option value="Utility">Utility</option>
+        <option value="Quality">Quality</option>
+        <option value="Packing">Packing / Packaging</option>
+        <option value="Store">Store</option>
+        <option value="HR &amp; Admin">HR &amp; Admin</option>
+        <option value="Others">Others (लिखें)</option>
+      </select>
+      <input class="inp-field" type="text" id="mgrDepartmentOther" placeholder="अपना Department लिखें" style="margin-bottom:14px;display:none">
       <button class="big-btn" onclick="_submitManagerReg()">&#128228; Registration भेजें</button>
       <button class="back-btn" onclick="showStep(3)">&larr; वापस</button>
     </div>
@@ -5070,11 +5098,21 @@ async function _loadManagerOptions(){
   }
 }
 
+function _toggleOtherField(selectId,otherId){
+  const sel=document.getElementById(selectId);
+  const other=document.getElementById(otherId);
+  if(!sel||!other) return;
+  other.style.display=sel.value==='Others'?'block':'none';
+  if(sel.value==='Others') other.focus();
+}
+
 async function _submitManagerReg(){
   const name=(document.getElementById('mgrName')?.value||'').trim();
   const comp=(document.getElementById('mgrCompany')?.value||'').trim();
-  const desig=(document.getElementById('mgrDesignation')?.value||'').trim();
-  const dept=(document.getElementById('mgrDepartment')?.value||'').trim();
+  let desig=(document.getElementById('mgrDesignation')?.value||'').trim();
+  if(desig==='Others') desig=(document.getElementById('mgrDesignationOther')?.value||'').trim();
+  let dept=(document.getElementById('mgrDepartment')?.value||'').trim();
+  if(dept==='Others') dept=(document.getElementById('mgrDepartmentOther')?.value||'').trim();
   const errEl=document.getElementById('mgrRegErr');
   if(!name||!comp||!desig||!dept){
     if(errEl){ errEl.textContent='⚠️ सभी फ़ील्ड अनिवार्य हैं'; errEl.classList.add('show'); } return;
@@ -5127,6 +5165,8 @@ function _launchAsNewUser(userData){
   SESSION.company=userData.company||'';
   SESSION.mobile=userData.mobile;
   SESSION.newUser=true;
+  SESSION.loginAt=new Date().toISOString();
+  saveSession();
   launchApp();
 }
 
