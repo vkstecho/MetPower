@@ -2168,8 +2168,12 @@ setTimeout(_forceLogin, 10000);
       <input class="inp-field" type="text" id="memName" placeholder="आपका नाम" style="margin-bottom:10px">
       <label class="inp-label">&#127970; Company का नाम *</label>
       <input class="inp-field" type="text" id="memCompany" placeholder="अपनी company का नाम" style="margin-bottom:10px">
-      <div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#60a5fa;line-height:1.6">
-        &#128161; Employee Code आपका Manager देगा &mdash; अभी जरूरी नहीं है
+      <label class="inp-label">&#128100; अपना Manager चुनें *</label>
+      <select class="inp-field" id="memManagerSelect" style="margin-bottom:10px">
+        <option value="">-- Manager चुनें --</option>
+      </select>
+      <div id="memNoManagerHint" style="display:none;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#f97316;line-height:1.6">
+        &#9888;&#65039; अभी कोई approved Manager नहीं मिला। पहले अपने Manager को register करने को कहें, फिर वापस आएं।
       </div>
       <button class="big-btn" onclick="_submitMemberReg()">&#128228; Registration भेजें</button>
       <button class="back-btn" onclick="showStep(3)">&larr; वापस</button>
@@ -2559,9 +2563,21 @@ setTimeout(_forceLogin, 10000);
   <div class="stitle">📱 नए Device Requests</div>
   <div id="pendingDevices"></div>
       <div style="font-size:12px;font-weight:800;color:#a855f7;letter-spacing:.5px;margin:16px 0 8px">
-        &#128273; NEW REGISTRATIONS (Manager / Member)
+        &#128273; NEW MANAGER REGISTRATIONS
       </div>
       <div id="mgrApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+      <div id="myTeamApprovalsBlock" style="display:none">
+        <div style="font-size:12px;font-weight:800;color:#60a5fa;letter-spacing:.5px;margin:16px 0 8px">
+          &#128101; मेरी TEAM &mdash; PENDING MEMBERS
+        </div>
+        <div id="myTeamApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+      </div>
+      <div id="adminTeamHierarchyBlock" style="display:none">
+        <div style="font-size:12px;font-weight:800;color:#22c55e;letter-spacing:.5px;margin:16px 0 8px">
+          &#127959;&#65039; MANAGERS &amp; उनकी TEAMS
+        </div>
+        <div id="adminTeamHierarchySection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+      </div>
   <div class="stitle">👤 नए रजिस्ट्रेशन</div>
   <div id="pendingRegs"></div>
   <div class="stitle">🌴 छुट्टी आवेदन</div>
@@ -5005,7 +5021,13 @@ async function _checkUserAfterOTP(){
       if(userData.status==='rejected'){
         toast('❌ आपका रजिस्ट्रेशन reject हो गया। VKS Tech से संपर्क करें।'); return;
       }
+      if(userData.status==='revoked'){
+        toast('🚫 आपकी access revoke कर दी गई है। VKS Tech से संपर्क करें: +91-8929394920'); return;
+      }
       if(userData.status==='approved'){
+        if(userData.validTill && new Date(userData.validTill)<new Date()){
+          toast('⏰ आपकी access expire हो गई है। Admin से validity बढ़वाएं: +91-8929394920'); return;
+        }
         _launchAsNewUser(userData); return;
       }
     }
@@ -5024,7 +5046,28 @@ function _selectRole(role){
       el.style.background=r===role?'rgba(249,115,22,.08)':'var(--card2)';
     }
   });
-  setTimeout(()=>{ if(role==='manager') showStep('mgrReg'); else showStep('memReg'); },200);
+  setTimeout(()=>{ if(role==='manager') showStep('mgrReg'); else { showStep('memReg'); _loadManagerOptions(); } },200);
+}
+
+async function _loadManagerOptions(){
+  const sel=document.getElementById('memManagerSelect');
+  const hint=document.getElementById('memNoManagerHint');
+  if(!sel) return;
+  sel.innerHTML='<option value="">-- लोड हो रहा है... --</option>';
+  try{
+    const data=await fbGet('mobileUsers');
+    const managers=data?Object.entries(data).filter(([k,v])=>v.role==='manager'&&v.status==='approved'):[];
+    if(!managers.length){
+      sel.innerHTML='<option value="">-- कोई Manager उपलब्ध नहीं --</option>';
+      if(hint) hint.style.display='block';
+      return;
+    }
+    if(hint) hint.style.display='none';
+    sel.innerHTML='<option value="">-- Manager चुनें --</option>'+
+      managers.map(([k,v])=>`<option value="${k}" data-name="${v.name}">${v.name} (${v.company||'—'})</option>`).join('');
+  }catch(e){
+    sel.innerHTML='<option value="">-- Error loading --</option>';
+  }
 }
 
 async function _submitManagerReg(){
@@ -5053,19 +5096,25 @@ async function _submitManagerReg(){
 async function _submitMemberReg(){
   const name=(document.getElementById('memName')?.value||'').trim();
   const comp=(document.getElementById('memCompany')?.value||'').trim();
+  const mgrSel=document.getElementById('memManagerSelect');
+  const managerId=mgrSel?.value||'';
+  const managerName=mgrSel?.selectedOptions?.[0]?.dataset?.name||'';
   const errEl=document.getElementById('memRegErr');
   if(!name||!comp){
     if(errEl){ errEl.textContent='⚠️ नाम और Company अनिवार्य हैं'; errEl.classList.add('show'); } return;
   }
+  if(!managerId){
+    if(errEl){ errEl.textContent='⚠️ कृपया अपना Manager चुनें'; errEl.classList.add('show'); } return;
+  }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
   const userData={role:'member',name,mobile:_loginMobile,company:comp,
-    status:'pending',empCode:'',managerId:'',registeredAt:new Date().toISOString()};
+    status:'pending',empCode:'',managerId,managerName,registeredAt:new Date().toISOString()};
   try{
     await fbSet('mobileUsers/'+mobile,userData);
     await fbPush('adminNotifications',{type:'member_registration',...userData,
-      message:name+' ने Member के रूप में register किया। Company: '+comp});
+      message:name+' ने Member के रूप में register किया। Manager: '+managerName});
     const pendMsg=document.getElementById('pendingMsg');
-    if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Member रजिस्ट्रेशन हो गया है।<br><br>आपकी Company के Manager अप्रूव करेंगे।';
+    if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Member रजिस्ट्रेशन हो गया है।<br><br>आपके Manager <b>'+managerName+'</b> अप्रूव करेंगे।';
     showStep('pending');
     toast('✅ Registration! Manager अप्रूव करेगा');
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
@@ -9739,6 +9788,8 @@ async function submitImpInfo(){
 // ════════════════════════════════════════
 function renderPendingDevices(){
   setTimeout(renderManagerApprovals,100);
+  setTimeout(renderMyTeamApprovals,100);
+  setTimeout(renderAdminTeamHierarchy,100);
   const el = document.getElementById('pendingDevices');
   if(!el) return;
   fbGet('deviceChangeRequests').then(data=>{
@@ -9787,16 +9838,14 @@ function renderManagerApprovals(){
   if(!el) return;
   fbGet('mobileUsers').then(data=>{
     if(!data){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई pending registration नहीं</div>'; return; }
-    const entries=Object.entries(data).filter(([k,v])=>v.status==='pending');
-    if(!entries.length){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई pending registration नहीं</div>'; return; }
+    const entries=Object.entries(data).filter(([k,v])=>v.status==='pending'&&v.role==='manager');
+    if(!entries.length){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई pending Manager registration नहीं</div>'; return; }
     el.innerHTML=entries.map(([mobile,u])=>`
       <div class="card" style="margin-bottom:10px">
         <div class="card-row">
-          <div class="card-ico" style="background:${u.role==='manager'?'rgba(249,115,22,.12)':'rgba(96,165,250,.12)'}">
-            ${u.role==='manager'?'👔':'👤'}
-          </div>
+          <div class="card-ico" style="background:rgba(249,115,22,.12)">👔</div>
           <div class="card-body">
-            <div class="card-name">${u.name} <span style="font-size:10px;background:${u.role==='manager'?'rgba(249,115,22,.15)':'rgba(96,165,250,.15)'};color:${u.role==='manager'?'#f97316':'#60a5fa'};padding:2px 6px;border-radius:4px;margin-left:4px">${u.role==='manager'?'MANAGER':'MEMBER'}</span></div>
+            <div class="card-name">${u.name} <span style="font-size:10px;background:rgba(249,115,22,.15);color:#f97316;padding:2px 6px;border-radius:4px;margin-left:4px">MANAGER</span></div>
             <div class="card-sub">📱 ${u.mobile} &nbsp;·&nbsp; 🏢 ${u.company||'—'}</div>
             ${u.designation?'<div class="card-meta">'+u.designation+(u.department?' · '+u.department:'')+'</div>':''}
             <div class="card-meta">${new Date(u.registeredAt).toLocaleString('hi-IN')}</div>
@@ -9815,6 +9864,7 @@ async function approveMobileUser(mobile){
     await fbUpdate('mobileUsers/'+mobile,{status:'approved',approvedAt:new Date().toISOString(),approvedBy:SESSION.name});
     toast('✅ User approve हो गया!');
     renderManagerApprovals();
+    renderMyTeamApprovals();
   }catch(e){ toast('❌ Error: '+e.message); }
 }
 
@@ -9825,6 +9875,132 @@ async function rejectMobileUser(mobile,name){
     await fbUpdate('mobileUsers/'+mobile,{status:'rejected',rejectedAt:new Date().toISOString(),rejectedBy:SESSION.name});
     toast('❌ '+name+' का registration reject हो गया');
     renderManagerApprovals();
+    renderMyTeamApprovals();
+  }catch(e){ toast('❌ Error: '+e.message); }
+}
+
+// ── Manager approves their OWN pending team Members ──
+function renderMyTeamApprovals(){
+  const block=document.getElementById('myTeamApprovalsBlock');
+  const el=document.getElementById('myTeamApprovalsSection');
+  if(!block||!el) return;
+  if(SESSION.role!=='manager'){ block.style.display='none'; return; }
+  block.style.display='block';
+  const myKey=(SESSION.mobile||'').replace('+91','').replace(/[^0-9]/g,'');
+  fbGet('mobileUsers').then(data=>{
+    if(!data){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई pending member नहीं</div>'; return; }
+    const entries=Object.entries(data).filter(([k,v])=>v.status==='pending'&&v.role==='member'&&v.managerId===myKey);
+    if(!entries.length){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई pending member नहीं</div>'; return; }
+    el.innerHTML=entries.map(([mobile,u])=>`
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-row">
+          <div class="card-ico" style="background:rgba(96,165,250,.12)">👤</div>
+          <div class="card-body">
+            <div class="card-name">${u.name} <span style="font-size:10px;background:rgba(96,165,250,.15);color:#60a5fa;padding:2px 6px;border-radius:4px;margin-left:4px">MEMBER</span></div>
+            <div class="card-sub">📱 ${u.mobile} &nbsp;·&nbsp; 🏢 ${u.company||'—'}</div>
+            <div class="card-meta">${new Date(u.registeredAt).toLocaleString('hi-IN')}</div>
+          </div>
+        </div>
+        <div class="action-row">
+          <button class="act-btn approve" onclick="approveMobileUser('${mobile}')">✅ Approve</button>
+          <button class="act-btn reject"  onclick="rejectMobileUser('${mobile}','${u.name}')">❌ Reject</button>
+        </div>
+      </div>`).join('');
+  });
+}
+
+// ── Admin: Managers & their Teams hierarchy view ──
+function renderAdminTeamHierarchy(){
+  const block=document.getElementById('adminTeamHierarchyBlock');
+  const el=document.getElementById('adminTeamHierarchySection');
+  if(!block||!el) return;
+  if(!isAdmin()){ block.style.display='none'; return; }
+  block.style.display='block';
+  fbGet('mobileUsers').then(data=>{
+    if(!data){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager नहीं</div>'; return; }
+    const all=Object.entries(data);
+    const managers=all.filter(([k,v])=>v.role==='manager'&&v.status!=='rejected');
+    if(!managers.length){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager नहीं</div>'; return; }
+    el.innerHTML=managers.map(([mgrKey,mgr])=>{
+      const members=all.filter(([k,v])=>v.role==='member'&&v.managerId===mgrKey&&v.status!=='rejected');
+      const statusBadge=_mobileStatusBadge(mgr);
+      const membersHtml=members.length?members.map(([memKey,mem])=>`
+          <div style="padding:10px 12px;border-top:1px solid var(--border2);display:flex;align-items:center;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:700;color:var(--text)">&#128100; ${mem.name}</div>
+              <div style="font-size:11px;color:#64748b">📱 ${mem.mobile}</div>
+            </div>
+            ${_mobileStatusBadge(mem)}
+            ${_mobileActionButtons(memKey,mem.name,mem.status)}
+          </div>`).join(''):
+        '<div style="padding:10px 12px;border-top:1px solid var(--border2);font-size:11px;color:#64748b">इस Manager के अंतर्गत कोई Member नहीं</div>';
+      return `
+      <div class="card" style="margin-bottom:12px;padding:0;overflow:hidden">
+        <div style="padding:12px;background:rgba(249,115,22,.06);display:flex;align-items:center;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:900;color:var(--text)">👔 ${mgr.name} <span style="font-size:10px;color:#64748b;font-weight:600">(${members.length} members)</span></div>
+            <div style="font-size:11px;color:#64748b">📱 ${mgr.mobile} &nbsp;·&nbsp; 🏢 ${mgr.company||'—'}</div>
+          </div>
+          ${statusBadge}
+          ${_mobileActionButtons(mgrKey,mgr.name,mgr.status)}
+        </div>
+        ${membersHtml}
+      </div>`;
+    }).join('');
+  });
+}
+
+function _mobileStatusBadge(u){
+  const map={approved:['#22c55e','Active'],revoked:['#f43f5e','Revoked'],pending:['#f97316','Pending']};
+  const [color,label]=map[u.status]||['#64748b',u.status||'—'];
+  let extra='';
+  if(u.status==='approved'&&u.validTill){
+    const daysLeft=Math.ceil((new Date(u.validTill)-new Date())/86400000);
+    extra=daysLeft>=0?` · ${daysLeft}d left`:' · Expired';
+  }
+  return `<span style="font-size:10px;background:${color}22;color:${color};padding:3px 7px;border-radius:5px;font-weight:700;white-space:nowrap">${label}${extra}</span>`;
+}
+
+function _mobileActionButtons(key,name,status){
+  const safeName=name.replace(/'/g,"\\'");
+  if(status==='revoked'){
+    return `<button onclick="adminRestoreMobileUser('${key}','${safeName}')" style="font-size:10px;padding:5px 8px;border-radius:6px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.08);color:#22c55e;font-weight:700;cursor:pointer;white-space:nowrap">↺ Restore</button>`;
+  }
+  if(status==='approved'){
+    return `<div style="display:flex;gap:4px">
+      <button onclick="adminExtendMobileValidity('${key}','${safeName}',30)" style="font-size:10px;padding:5px 8px;border-radius:6px;border:1px solid rgba(96,165,250,.3);background:rgba(96,165,250,.08);color:#60a5fa;font-weight:700;cursor:pointer;white-space:nowrap">+30d</button>
+      <button onclick="adminRevokeMobileUser('${key}','${safeName}')" style="font-size:10px;padding:5px 8px;border-radius:6px;border:1px solid rgba(244,63,94,.3);background:rgba(244,63,94,.08);color:#f43f5e;font-weight:700;cursor:pointer;white-space:nowrap">🚫 Revoke</button>
+    </div>`;
+  }
+  return '';
+}
+
+async function adminRevokeMobileUser(mobile,name){
+  const ok=await confirmModal('Access Revoke करें?',`<b>${name}</b> की App access revoke होगी। वो login नहीं कर पाएंगे।`,'🚫 हाँ, Revoke करें','रद्द करें');
+  if(!ok) return;
+  try{
+    await fbUpdate('mobileUsers/'+mobile,{status:'revoked',revokedBy:SESSION.name,revokedAt:new Date().toISOString()});
+    toast('🚫 '+name+' की access revoke कर दी');
+    renderAdminTeamHierarchy();
+  }catch(e){ toast('❌ Error: '+e.message); }
+}
+
+async function adminRestoreMobileUser(mobile,name){
+  try{
+    await fbUpdate('mobileUsers/'+mobile,{status:'approved',restoredBy:SESSION.name,restoredAt:new Date().toISOString()});
+    toast('✅ '+name+' की access restore हो गई');
+    renderAdminTeamHierarchy();
+  }catch(e){ toast('❌ Error: '+e.message); }
+}
+
+async function adminExtendMobileValidity(mobile,name,days){
+  try{
+    const rec=await fbGet('mobileUsers/'+mobile).catch(()=>null);
+    const base=rec&&rec.validTill&&new Date(rec.validTill)>new Date()?new Date(rec.validTill):new Date();
+    const newExp=new Date(base.getTime()+days*86400000);
+    await fbUpdate('mobileUsers/'+mobile,{validTill:newExp.toISOString(),extendedBy:SESSION.name,extendedAt:new Date().toISOString()});
+    toast('✅ '+name+' की expiry '+days+' दिन बढ़ाई → '+newExp.toLocaleDateString('en-IN'));
+    renderAdminTeamHierarchy();
   }catch(e){ toast('❌ Error: '+e.message); }
 }
 
