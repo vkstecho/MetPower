@@ -2119,13 +2119,13 @@ setTimeout(_forceLogin, 10000);
         <div id="roleCard_manager" onclick="_selectRole('manager')"
           style="padding:18px;border-radius:14px;border:2px solid var(--border2);background:var(--card2);cursor:pointer;transition:all .2s">
           <div style="font-size:28px;margin-bottom:6px">&#128084;</div>
-          <div style="font-size:15px;font-weight:900;color:#fff">Team Manager</div>
+          <div style="font-size:15px;font-weight:900;color:var(--text)">Team Manager</div>
           <div style="font-size:12px;color:#64748b;margin-top:3px">मैं एक Manager हूं &mdash; अपनी team बनाना चाहता/चाहती हूं</div>
         </div>
         <div id="roleCard_member" onclick="_selectRole('member')"
           style="padding:18px;border-radius:14px;border:2px solid var(--border2);background:var(--card2);cursor:pointer;transition:all .2s">
           <div style="font-size:28px;margin-bottom:6px">&#128100;</div>
-          <div style="font-size:15px;font-weight:900;color:#fff">Team Member</div>
+          <div style="font-size:15px;font-weight:900;color:var(--text)">Team Member</div>
           <div style="font-size:12px;color:#64748b;margin-top:3px">मैं एक Member हूं &mdash; अपने Manager की team में शामिल हूं</div>
         </div>
       </div>
@@ -5034,7 +5034,7 @@ async function _submitManagerReg(){
   const dept=(document.getElementById('mgrDepartment')?.value||'').trim();
   const errEl=document.getElementById('mgrRegErr');
   if(!name||!comp||!desig||!dept){
-    if(errEl) errEl.textContent='⚠️ सभी फ़ील्ड अनिवार्य हैं'; return;
+    if(errEl){ errEl.textContent='⚠️ सभी फ़ील्ड अनिवार्य हैं'; errEl.classList.add('show'); } return;
   }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
   const userData={role:'manager',name,mobile:_loginMobile,company:comp,
@@ -5047,7 +5047,7 @@ async function _submitManagerReg(){
     if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Manager रजिस्ट्रेशन हो गया है।<br><br>VKS Tech Admin वेरिफाई करेगा।';
     showStep('pending');
     toast('✅ Registration! Admin अप्रूव करेगा');
-  }catch(e){ if(errEl) errEl.textContent='❌ Error: '+e.message; }
+  }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
 async function _submitMemberReg(){
@@ -5055,7 +5055,7 @@ async function _submitMemberReg(){
   const comp=(document.getElementById('memCompany')?.value||'').trim();
   const errEl=document.getElementById('memRegErr');
   if(!name||!comp){
-    if(errEl) errEl.textContent='⚠️ नाम और Company अनिवार्य हैं'; return;
+    if(errEl){ errEl.textContent='⚠️ नाम और Company अनिवार्य हैं'; errEl.classList.add('show'); } return;
   }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
   const userData={role:'member',name,mobile:_loginMobile,company:comp,
@@ -5068,7 +5068,7 @@ async function _submitMemberReg(){
     if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Member रजिस्ट्रेशन हो गया है।<br><br>आपकी Company के Manager अप्रूव करेंगे।';
     showStep('pending');
     toast('✅ Registration! Manager अप्रूव करेगा');
-  }catch(e){ if(errEl) errEl.textContent='❌ Error: '+e.message; }
+  }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
 function _launchAsNewUser(userData){
