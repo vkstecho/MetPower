@@ -2600,12 +2600,6 @@ setTimeout(_forceLogin, 10000);
         </div>
         <div id="myTeamApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
       </div>
-      <div id="adminTeamHierarchyBlock" style="display:none">
-        <div style="font-size:12px;font-weight:800;color:#22c55e;letter-spacing:.5px;margin:16px 0 8px">
-          &#127959;&#65039; MANAGERS &amp; उनकी TEAMS
-        </div>
-        <div id="adminTeamHierarchySection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
-      </div>
   <div class="stitle">👤 नए रजिस्ट्रेशन</div>
   <div id="pendingRegs"></div>
   <div class="stitle">🌴 छुट्टी आवेदन</div>
@@ -2617,6 +2611,15 @@ setTimeout(_forceLogin, 10000);
 <!-- ── TEAM ── -->
 <div class="tab" id="tab-team">
   <div class="page-title" id="pageTitleTeam">टीम</div>
+  <div id="adminTeamHierarchyBlock" style="display:none">
+    <div style="font-size:12px;font-weight:800;color:#22c55e;letter-spacing:.5px;margin:0 0 8px">
+      &#127959;&#65039; MANAGERS &amp; उनकी TEAMS (Mobile Registration)
+    </div>
+    <div id="adminTeamHierarchySection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+    <div style="font-size:12px;font-weight:800;color:#94a3b8;letter-spacing:.5px;margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--border2)">
+      &#128100; कर्मचारी (Employee Code System)
+    </div>
+  </div>
   <div id="teamAddBtn"></div>
   <div class="search-box">
     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" stroke-width="2"/><path d="m21 21-4.35-4.35" stroke-width="2" stroke-linecap="round"/></svg>
@@ -4944,7 +4947,7 @@ function showStep(n){
     'mgrReg':'loginStepManagerReg','memReg':'loginStepMemberReg','pending':'loginStepPending'};
   const el=document.getElementById(map[n]); if(el) el.style.display='flex';
 }
-function backToStep1(){ showStep(1); }
+function backToStep1(){ _approvalWatchActive=false; showStep(1); }
 function showAdminLogin(){ showStep('admin'); setTimeout(()=>document.getElementById('aUser')?.focus(),100); }
 function checkGuestCompany(){}
 function selectCompany(co,el){}
@@ -5044,7 +5047,7 @@ async function _checkUserAfterOTP(){
         const rLabel=userData.role==='manager'?'Manager':'Member';
         if(pendMsg) pendMsg.innerHTML='आपका <b>'+rLabel+'</b> रजिस्ट्रेशन (<b>'+userData.name+'</b>) pending है।<br><br>'
           +(userData.role==='manager'?'VKS Tech Admin वेरिफाई करेगा।':'आपका Manager अप्रूव करेगा।');
-        showStep('pending'); return;
+        showStep('pending'); _watchApprovalStatus(mobile); return;
       }
       if(userData.status==='rejected'){
         toast('❌ आपका रजिस्ट्रेशन reject हो गया। VKS Tech से संपर्क करें।'); return;
@@ -5064,6 +5067,24 @@ async function _checkUserAfterOTP(){
     console.error('_checkUserAfterOTP:',err);
     showStep(3);
   }
+}
+
+let _approvalWatchActive=false;
+function _watchApprovalStatus(mobile){
+  if(_approvalWatchActive) return;
+  _approvalWatchActive=true;
+  fbListen('mobileUsers/'+mobile, userData=>{
+    if(!userData) return;
+    if(userData.status==='approved'){
+      if(userData.validTill && new Date(userData.validTill)<new Date()) return;
+      _approvalWatchActive=false;
+      toast('✅ Approve हो गया! Login हो रहा है...');
+      _launchAsNewUser(userData);
+    }else if(userData.status==='rejected'){
+      _approvalWatchActive=false;
+      toast('❌ आपका रजिस्ट्रेशन reject हो गया। VKS Tech से संपर्क करें।');
+    }
+  });
 }
 
 function _selectRole(role){
@@ -5127,6 +5148,7 @@ async function _submitManagerReg(){
     const pendMsg=document.getElementById('pendingMsg');
     if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Manager रजिस्ट्रेशन हो गया है।<br><br>VKS Tech Admin वेरिफाई करेगा।';
     showStep('pending');
+    _watchApprovalStatus(mobile);
     toast('✅ Registration! Admin अप्रूव करेगा');
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
@@ -5154,6 +5176,7 @@ async function _submitMemberReg(){
     const pendMsg=document.getElementById('pendingMsg');
     if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Member रजिस्ट्रेशन हो गया है।<br><br>आपके Manager <b>'+managerName+'</b> अप्रूव करेंगे।';
     showStep('pending');
+    _watchApprovalStatus(mobile);
     toast('✅ Registration! Manager अप्रूव करेगा');
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
@@ -6187,8 +6210,7 @@ async function launchApp(){
   try { await buildNav(); } catch(e){ console.warn('buildNav error:',e); }
   // Re-sync header height after nav is built (sidebar depends on accurate --hdr-height)
   try{ syncStickyTop(); }catch(e){}
-  _currentTab = 'home'; // Reset to home tab on every fresh login
-  goTab('home');        // Explicitly go to home — never leave blank
+  goTab(_currentTab||'home'); // buildNav() already set _currentTab to the correct role-based landing tab
   renderAll();
   updateSyncTime();
   setTimeout(()=>{ try{syncStickyTop();}catch(e){} }, 1200);
@@ -6218,9 +6240,9 @@ async function launchApp(){
 async function buildNav(){
   // ── ALL POSSIBLE TABS (master list) ──
   const ALL_TABS = [
-    {id:'home',      ico:'🏠', lbl:'होम',       lblEn:'Home',      roles:['admin','worker','guest','manager','supervisor']},
-    {id:'schedule',  ico:'📅', lbl:'शेड्यूल',   lblEn:'Schedule',  roles:['admin','worker','manager','supervisor']},
-    {id:'leave',     ico:'🏖️', lbl:'अवकाश',    lblEn:'Leave',     roles:['admin','worker','manager']},
+    {id:'home',      ico:'🏠', lbl:'होम',       lblEn:'Home',      roles:['worker','guest','manager','supervisor']},
+    {id:'schedule',  ico:'📅', lbl:'शेड्यूल',   lblEn:'Schedule',  roles:['worker','manager','supervisor']},
+    {id:'leave',     ico:'🏖️', lbl:'अवकाश',    lblEn:'Leave',     roles:['worker','manager']},
     {id:'reports',   ico:'📋', lbl:'रिपोर्ट',   lblEn:'Reports',   roles:['admin','worker','manager','supervisor']},
     {id:'todo',      ico:'✅', lbl:'To-Do',      lblEn:'To-Do',     roles:['admin','guest','worker','manager','supervisor']},
     {id:'pending',   ico:'⏳', lbl:'पेंडिंग',   lblEn:'Pending',   roles:['admin','manager']},
@@ -6255,7 +6277,7 @@ async function buildNav(){
     });
   }
 
-  const firstTab = tabs[0].id;
+  const firstTab = (effectiveRole==='admin' && tabs.some(t=>t.id==='pending')) ? 'pending' : tabs[0].id;
   _currentTab = firstTab;
 
   // Hide sync row for guest users (irrelevant for guests)
@@ -6266,7 +6288,7 @@ async function buildNav(){
 
   document.getElementById('mainNav').innerHTML = tabs.map((t,i)=>{
     const label = (typeof _lang !== 'undefined' && _lang === 'en') ? (t.lblEn||t.lbl) : t.lbl;
-    return `<button class="nb${i===0?' on':''}" id="nb-${t.id}" onclick="goTab('${t.id}')" aria-label="${label}">
+    return `<button class="nb${t.id===firstTab?' on':''}" id="nb-${t.id}" onclick="goTab('${t.id}')" aria-label="${label}">
       <span class="nb-ico">${t.ico}</span><span style="font-size:14px;font-weight:800">${label}</span>
       ${t.id==='pending'?'<span class="nb-badge" id="pendingBadge" style="display:none">0</span>':''}
       ${t.id==='todo'?'<span class="nb-badge" id="todoBadge" style="display:none">0</span>':''}
@@ -6283,7 +6305,7 @@ async function buildNav(){
     // Insert before divider
     tabs.forEach((t,i)=>{
       const btn = document.createElement('button');
-      btn.className = 'pc-nav-btn' + (i===0?' on':'');
+      btn.className = 'pc-nav-btn' + (t.id===firstTab?' on':'');
       btn.id = 'pc-nb-'+t.id;
       const sLabel = (typeof _lang !== 'undefined' && _lang === 'en') ? (t.lblEn||t.lbl) : t.lbl;
       btn.setAttribute('aria-label', sLabel);
@@ -6510,7 +6532,7 @@ function _goTabDirect(t){
   if(t==='leave')        { renderLeaves(); renderResignations(); }
   if(t==='reports')      renderReports();
   if(t==='pending')      renderPending();
-  if(t==='team')         renderTeam();
+  if(t==='team')         { renderTeam(); renderAdminTeamHierarchy(); }
   if(t==='instructions') renderInstructions();
   // Re-apply language so any newly-rendered elements get translated.
   // Run twice — once immediately, once after async renders settle.
@@ -9829,7 +9851,6 @@ async function submitImpInfo(){
 function renderPendingDevices(){
   setTimeout(renderManagerApprovals,100);
   setTimeout(renderMyTeamApprovals,100);
-  setTimeout(renderAdminTeamHierarchy,100);
   const el = document.getElementById('pendingDevices');
   if(!el) return;
   fbGet('deviceChangeRequests').then(data=>{
@@ -9960,8 +9981,14 @@ function renderAdminTeamHierarchy(){
     if(!data){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager नहीं</div>'; return; }
     const all=Object.entries(data);
     const managers=all.filter(([k,v])=>v.role==='manager'&&v.status!=='rejected');
-    if(!managers.length){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager नहीं</div>'; return; }
-    el.innerHTML=managers.map(([mgrKey,mgr])=>{
+    const managerKeys=new Set(managers.map(([k])=>k));
+    const uncategorised=all.filter(([k,v])=>v.role==='member'&&v.status!=='rejected'&&(!v.managerId||!managerKeys.has(v.managerId)));
+
+    if(!managers.length && !uncategorised.length){
+      el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager/Member नहीं</div>'; return;
+    }
+
+    let html=managers.map(([mgrKey,mgr])=>{
       const members=all.filter(([k,v])=>v.role==='member'&&v.managerId===mgrKey&&v.status!=='rejected');
       const statusBadge=_mobileStatusBadge(mgr);
       const membersHtml=members.length?members.map(([memKey,mem])=>`
@@ -9987,6 +10014,27 @@ function renderAdminTeamHierarchy(){
         ${membersHtml}
       </div>`;
     }).join('');
+
+    // ── Uncategorised Members: no Manager, or their Manager was removed/rejected ──
+    if(uncategorised.length){
+      html+=`
+      <div style="font-size:12px;font-weight:800;color:#f97316;letter-spacing:.5px;margin:18px 0 8px">
+        &#10067; UNCATEGORISED MEMBERS <span style="color:#64748b;font-weight:600">(${uncategorised.length})</span>
+      </div>
+      <div class="card" style="margin-bottom:12px;padding:0;overflow:hidden;border-color:rgba(249,115,22,.3)">
+        ${uncategorised.map(([memKey,mem])=>`
+          <div style="padding:10px 12px;border-top:1px solid var(--border2);display:flex;align-items:center;gap:8px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:700;color:var(--text)">&#128100; ${mem.name}</div>
+              <div style="font-size:11px;color:#64748b">📱 ${mem.mobile} &nbsp;·&nbsp; 🏢 ${mem.company||'—'}</div>
+            </div>
+            ${_mobileStatusBadge(mem)}
+            ${_mobileActionButtons(memKey,mem.name,mem.status)}
+          </div>`).join('').replace('border-top:1px solid var(--border2);','')}
+      </div>`;
+    }
+
+    el.innerHTML=html;
   });
 }
 
