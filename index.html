@@ -537,6 +537,17 @@ body.light #loginPwaBtn { background:linear-gradient(135deg,rgba(249,115,22,.2),
 }
 .inp-field:focus{border-color:var(--m1);}
 .inp-field.error{border-color:var(--lv);}
+/* Fix Chrome/Safari autofill forcing illegible dark-on-dark text */
+.inp-field:-webkit-autofill,
+.inp-field:-webkit-autofill:hover,
+.inp-field:-webkit-autofill:focus,
+.inp-field:-webkit-autofill:active{
+  -webkit-text-fill-color:#fff !important;
+  -webkit-box-shadow:0 0 0 1000px var(--card) inset !important;
+  box-shadow:0 0 0 1000px var(--card) inset !important;
+  caret-color:#fff;
+  transition:background-color 5000s ease-in-out 0s;
+}
 .big-btn{
   width:100%;padding:18px;border-radius:14px;border:none;
   background:linear-gradient(135deg,var(--m1),#c2410c);
@@ -2143,9 +2154,9 @@ setTimeout(_forceLogin, 10000);
       </div>
       <div class="err-msg" id="mgrRegErr"></div>
       <label class="inp-label">&#128100; पूरा नाम *</label>
-      <input class="inp-field" type="text" id="mgrName" placeholder="आपका नाम" style="margin-bottom:10px">
+      <input class="inp-field" type="text" id="mgrName" placeholder="आपका नाम" autocomplete="off" style="margin-bottom:10px">
       <label class="inp-label">&#127970; Company का नाम *</label>
-      <input class="inp-field" type="text" id="mgrCompany" placeholder="जैसे: ABC Industries" style="margin-bottom:10px">
+      <input class="inp-field" type="text" id="mgrCompany" placeholder="जैसे: ABC Industries" autocomplete="off" style="margin-bottom:10px">
       <label class="inp-label">&#128188; Designation *</label>
       <select class="inp-field" id="mgrDesignation" style="margin-bottom:10px" onchange="_toggleOtherField('mgrDesignation','mgrDesignationOther')">
         <option value="">-- चुनें --</option>
@@ -2193,9 +2204,9 @@ setTimeout(_forceLogin, 10000);
       </div>
       <div class="err-msg" id="memRegErr"></div>
       <label class="inp-label">&#128100; पूरा नाम *</label>
-      <input class="inp-field" type="text" id="memName" placeholder="आपका नाम" style="margin-bottom:10px">
+      <input class="inp-field" type="text" id="memName" placeholder="आपका नाम" autocomplete="off" style="margin-bottom:10px">
       <label class="inp-label">&#127970; Company का नाम *</label>
-      <input class="inp-field" type="text" id="memCompany" placeholder="अपनी company का नाम" style="margin-bottom:10px">
+      <input class="inp-field" type="text" id="memCompany" placeholder="अपनी company का नाम" autocomplete="off" style="margin-bottom:10px">
       <label class="inp-label">&#128100; अपना Manager चुनें *</label>
       <select class="inp-field" id="memManagerSelect" style="margin-bottom:10px">
         <option value="">-- Manager चुनें --</option>
