@@ -4958,7 +4958,7 @@ function showStep(n){
     'mgrReg':'loginStepManagerReg','memReg':'loginStepMemberReg','pending':'loginStepPending'};
   const el=document.getElementById(map[n]); if(el) el.style.display='flex';
 }
-function backToStep1(){ _approvalWatchActive=false; showStep(1); }
+function backToStep1(){ _stopApprovalWatch(); showStep(1); }
 function showAdminLogin(){ showStep('admin'); setTimeout(()=>document.getElementById('aUser')?.focus(),100); }
 function checkGuestCompany(){}
 function selectCompany(co,el){}
@@ -5050,8 +5050,7 @@ async function _verifyOTP(){
 async function _checkUserAfterOTP(){
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
   try{
-    const snap=await fbGet('mobileUsers/'+mobile);
-    const userData=snap&&snap.val?snap.val():null;
+    const userData=await fbGet('mobileUsers/'+mobile);
     if(userData){
       if(userData.status==='pending'){
         const pendMsg=document.getElementById('pendingMsg');
@@ -5081,21 +5080,43 @@ async function _checkUserAfterOTP(){
 }
 
 let _approvalWatchActive=false;
+let _approvalPollTimer=null;
 function _watchApprovalStatus(mobile){
   if(_approvalWatchActive) return;
   _approvalWatchActive=true;
-  fbListen('mobileUsers/'+mobile, userData=>{
-    if(!userData) return;
+
+  const handleUpdate=userData=>{
+    if(!userData) return false;
     if(userData.status==='approved'){
-      if(userData.validTill && new Date(userData.validTill)<new Date()) return;
-      _approvalWatchActive=false;
+      if(userData.validTill && new Date(userData.validTill)<new Date()) return false;
+      _stopApprovalWatch();
       toast('✅ Approve हो गया! Login हो रहा है...');
       _launchAsNewUser(userData);
+      return true;
     }else if(userData.status==='rejected'){
-      _approvalWatchActive=false;
+      _stopApprovalWatch();
       toast('❌ आपका रजिस्ट्रेशन reject हो गया। VKS Tech से संपर्क करें।');
+      return true;
     }
-  });
+    return false;
+  };
+
+  // Primary: realtime listener (instant, but can be affected by tab throttling)
+  fbListen('mobileUsers/'+mobile, handleUpdate);
+
+  // Backup: poll every 8s in case the realtime connection is stale/throttled
+  if(_approvalPollTimer) clearInterval(_approvalPollTimer);
+  _approvalPollTimer=setInterval(async()=>{
+    if(!_approvalWatchActive){ clearInterval(_approvalPollTimer); return; }
+    try{
+      const userData=await fbGet('mobileUsers/'+mobile);
+      handleUpdate(userData);
+    }catch(e){}
+  },8000);
+}
+function _stopApprovalWatch(){
+  _approvalWatchActive=false;
+  if(_approvalPollTimer){ clearInterval(_approvalPollTimer); _approvalPollTimer=null; }
 }
 
 function _selectRole(role){
