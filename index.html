@@ -2393,6 +2393,12 @@ setTimeout(_forceLogin, 10000);
   <div class="sync-row" id="syncRow">
     <span id="syncLabel">🔄 लाइव सिंक · अंतिम अपडेट:</span> <span id="syncTime">—</span>
   </div>
+  <div id="companySwitchRow" style="display:none;padding:8px 16px;background:rgba(168,85,247,.08);border-bottom:1px solid var(--border2);align-items:center;gap:8px">
+    <span style="font-size:12px;font-weight:800;color:#a855f7">🏢</span>
+    <select id="companySwitchSel" onchange="switchViewCompany(this.value)"
+      style="flex:1;padding:6px 10px;border-radius:8px;border:1px solid rgba(168,85,247,.3);background:var(--card);color:var(--text);font-size:12px;font-weight:700;font-family:inherit">
+    </select>
+  </div>
   <nav class="nav" id="mainNav"></nav>
 </div>
 
@@ -4281,10 +4287,54 @@ async function initData(){
   initLearnListeners();
 }
 
-function getEmps()     { return _cache.employees   || []; }
+function _normCompanyId(s){ return (s||'').toString().trim().toLowerCase() || 'gls'; }
+function myCompanyId(){
+  if(isAdmin()) return SESSION.viewCompanyId || 'ALL';
+  if(SESSION.companyId) return SESSION.companyId;
+  return 'gls'; // legacy employee-code workers/managers/supervisors — all pre-existing GLS staff
+}
+function listAllCompanies(){
+  const ids=new Set();
+  const labels={};
+  (_cache.employees||[]).forEach(e=>{
+    const cid=_normCompanyId(e.companyId);
+    ids.add(cid);
+    if(!labels[cid]) labels[cid]=e.companyLabel||(cid==='gls'?'GLS':cid.toUpperCase());
+  });
+  return Array.from(ids).map(cid=>({id:cid,label:labels[cid]||cid.toUpperCase()})).sort((a,b)=>a.label.localeCompare(b.label));
+}
+function renderCompanySwitcher(){
+  const row=document.getElementById('companySwitchRow');
+  const sel=document.getElementById('companySwitchSel');
+  if(!row||!sel) return;
+  row.style.display='flex';
+  const companies=listAllCompanies();
+  const current=SESSION.viewCompanyId||'ALL';
+  sel.innerHTML='<option value="ALL">🌐 सभी Companies (All)</option>'+
+    companies.map(c=>`<option value="${c.id}"${c.id===current?' selected':''}>🏢 ${c.label}</option>`).join('');
+  sel.value=current;
+}
+function switchViewCompany(companyId){
+  SESSION.viewCompanyId=companyId;
+  saveSession();
+  toast(companyId==='ALL'?'🌐 सभी Companies दिख रही हैं':'🏢 अब सिर्फ इस Company का data दिख रहा है');
+  refreshAll();
+}
+function getEmps(){
+  const all=_cache.employees||[];
+  const cid=myCompanyId();
+  if(cid==='ALL') return all;
+  return all.filter(e=>_normCompanyId(e.companyId)===cid);
+}
 function getSchedules(){ return _cache.schedules   || {}; }
-function getLeaves()   { return _cache.leaves      || []; }
-function getReports()  { return _cache.reports     || []; }
+function getLeaves(){
+  const scopedIds=new Set(getEmps().map(e=>e.id));
+  return (_cache.leaves||[]).filter(l=>scopedIds.has(l.empId));
+}
+function getReports(){
+  const scopedIds=new Set(getEmps().map(e=>e.id));
+  return (_cache.reports||[]).filter(r=>scopedIds.has(r.aboutId));
+}
 function getOverrides(){ return _cache.overrides   || {}; }
 function getRegs()     { return _cache.regRequests || []; }
 function getInst()     { return _cache.instructions|| DEFAULT_INSTRUCTIONS; }
@@ -4517,6 +4567,7 @@ setTimeout(applyLang, 200);
 function isAdmin(){ return SESSION.role==='admin'; }
 function isMgr(){ 
   if(SESSION.role==='admin') return false;
+  if(SESSION.role==='manager') return true; // new mobile self-registration Manager
   const emp = myEmp();
   return emp && (emp.accessLevel==='manager' || emp.sec==='MGR' || emp.designation==='Manager' || SESSION.empId==='30000463');
 }
@@ -5218,6 +5269,7 @@ function _launchAsNewUser(userData){
   SESSION.name=userData.name;
   SESSION.role=userData.role;
   SESSION.company=userData.company||'';
+  SESSION.companyId=_normCompanyId(userData.company);
   SESSION.mobile=userData.mobile;
   SESSION.newUser=true;
   SESSION.loginAt=new Date().toISOString();
@@ -6204,8 +6256,9 @@ async function launchApp(){
 
   const rt=document.getElementById('roleTag');
   if(isAdmin()){ rt.textContent='🛡️ ADMIN'; rt.className='role-tag admin'; }
-  else if(isMgr()){ rt.textContent='🏅 MANAGER'; rt.className='role-tag'; rt.style.cssText='background:rgba(168,85,247,.2);color:#a855f7;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
+  else if(isMgr() || SESSION.role==='manager'){ rt.textContent='🏅 MANAGER'; rt.className='role-tag'; rt.style.cssText='background:rgba(168,85,247,.2);color:#a855f7;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
   else if(isSupervisor()){ rt.textContent='👁️ SUPERVISOR'; rt.className='role-tag'; rt.style.cssText='background:rgba(56,189,248,.15);color:#38bdf8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
+  else if(SESSION.role==='member'){ rt.textContent='👤 MEMBER'; rt.className='role-tag'; rt.style.cssText='background:rgba(96,165,250,.15);color:#60a5fa;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
   else if(isGuest()){ 
     const co = SESSION.company||'GUEST';
     rt.textContent = co !== 'GLS' ? '🏢 '+co : '👤 GUEST'; 
@@ -6220,6 +6273,10 @@ async function launchApp(){
     if(typeof Notification !== 'undefined' && Notification.permission==='default'){
       Notification.requestPermission().catch(()=>{});
     }
+    renderCompanySwitcher();
+  } else {
+    const csRow=document.getElementById('companySwitchRow');
+    if(csRow) csRow.style.display='none';
   }
   // ── Show notification bell for ALL logged-in users ──
   if(!isGuest()){
@@ -10342,6 +10399,7 @@ function renderTeam(search=''){
   document.getElementById('teamAddBtn').innerHTML = isAdminOrMgr()
     ? `<div style="display:flex;gap:8px;margin-bottom:14px">
         <button class="action-primary" style="flex:1" onclick="openAddEmpForm()">+ नया कर्मचारी जोड़ें</button>
+        <button class="action-primary" style="flex:1;background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="openBulkImportTeam()">📊 Excel से Team Import</button>
       </div>` : '';
 
   // Active employees only — those in the shift schedule (have ms array)
@@ -11262,6 +11320,146 @@ async function _confirmEmpUpload(){
   toast(`✅ ${saved} कर्मचारी save हो गए!${failed ? ' ' + failed + ' failed.' : ''}`);
 }
 
+// ════════════════════════════════════════
+// BULK IMPORT TEAM FROM EXCEL (creates NEW employees — unlike Emp Upload which only updates existing)
+// ════════════════════════════════════════
+let _bulkImportParsed = [];
+
+function openBulkImportTeam(){
+  openModal(`<div class="modal-handle"></div>
+  <div class="modal-title">📊 Excel से पूरी Team Import करें</div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:14px">
+    अपनी Excel/CSV file अपलोड करें जिसमें ये columns हों (कोई भी क्रम में, नाम केस-असंवेदनशील):<br>
+    <b style="color:var(--text)">Name</b> (जरूरी) · <b style="color:var(--text)">E Code</b> (जरूरी) ·
+    <b style="color:var(--text)">Designation</b> · <b style="color:var(--text)">Machine</b> ·
+    <b style="color:var(--text)">Responsibility</b> · <b style="color:var(--text)">Salary</b> (वैकल्पिक)
+  </div>
+  <button class="cancel-btn" style="margin-bottom:12px" onclick="downloadBulkImportTemplate()">⬇️ Sample Template Download करें</button>
+  <input type="file" id="bulkImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleBulkImportFile(this.files[0])">
+  <button class="submit-btn" onclick="document.getElementById('bulkImportFile').click()">📁 Excel/CSV File चुनें</button>
+  <div id="bulkImportPreview" style="margin-top:14px"></div>
+  <button class="cancel-btn" style="margin-top:10px" onclick="closeModal()">रद्द करें</button>`);
+}
+
+function downloadBulkImportTemplate(){
+  const csv='Name,E Code,Designation,Machine,Responsibility,Salary\nRAM KUMAR,30001001,Operator,M-1,Operation,25000\nSHYAM LAL,30001002,Supervisor,ALL,Quality Check,\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='team_import_template.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function handleBulkImportFile(file){
+  if(!file) return;
+  const previewEl=document.getElementById('bulkImportPreview');
+  previewEl.innerHTML='<div class="empty-text" style="padding:12px">Reading file...</div>';
+
+  const parseWorkbook=(data)=>{
+    const wb=XLSX.read(data,{type:'array'});
+    const sheet=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+    _processBulkImportRows(rows);
+  };
+
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      if(typeof XLSX==='undefined'){
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        s.onload=()=>parseWorkbook(new Uint8Array(e.target.result));
+        s.onerror=()=>{ previewEl.innerHTML='<div style="color:var(--lv);padding:12px">❌ Library load नहीं हुई। Internet जांचें।</div>'; };
+        document.head.appendChild(s);
+      }else{
+        parseWorkbook(new Uint8Array(e.target.result));
+      }
+    }catch(err){
+      previewEl.innerHTML='<div style="color:var(--lv);padding:12px">❌ Error: '+err.message+'</div>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function _findCol(row,names){
+  const keys=Object.keys(row);
+  for(const n of names){
+    const found=keys.find(k=>k.toString().trim().toLowerCase()===n);
+    if(found!==undefined && row[found]!=='') return row[found];
+  }
+  return '';
+}
+
+function _processBulkImportRows(rows){
+  const previewEl=document.getElementById('bulkImportPreview');
+  const existingCodes=new Set(getEmps().map(e=>(e.empId||'').toString().trim()));
+  const seenInFile=new Set();
+  _bulkImportParsed=[];
+  let dupCount=0, invalidCount=0;
+
+  rows.forEach(row=>{
+    const name=(_findCol(row,['name','naam','नाम'])||'').toString().trim().toUpperCase();
+    const code=(_findCol(row,['e code','ecode','emp code','employee code','code'])||'').toString().trim();
+    const designation=(_findCol(row,['designation','position','role'])||'').toString().trim();
+    const machine=(_findCol(row,['machine','mc'])||'').toString().trim();
+    const resp=(_findCol(row,['responsibility','resp'])||'').toString().trim();
+    const salary=(_findCol(row,['salary','monthly salary'])||'').toString().trim();
+
+    if(!name || !code){ invalidCount++; return; }
+    if(existingCodes.has(code) || seenInFile.has(code)){ dupCount++; return; }
+    seenInFile.add(code);
+    _bulkImportParsed.push({name,code,designation,machine,resp,salary});
+  });
+
+  if(!_bulkImportParsed.length){
+    previewEl.innerHTML=`<div style="color:var(--lv);padding:12px;font-size:12px">
+      ❌ कोई valid row नहीं मिली। ${invalidCount?invalidCount+' rows में Name/E-Code missing. ':''}${dupCount?dupCount+' duplicate codes skip हुए.':''}
+    </div>`;
+    return;
+  }
+
+  previewEl.innerHTML=`
+    <div style="font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px">
+      ✅ ${_bulkImportParsed.length} नए कर्मचारी तैयार ${dupCount?'· '+dupCount+' duplicate skip हुए':''}${invalidCount?'· '+invalidCount+' invalid rows skip हुए':''}
+    </div>
+    <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px">
+      ${_bulkImportParsed.map(e=>`
+        <div style="padding:8px 10px;border-bottom:1px solid var(--border2);font-size:12px">
+          <b style="color:var(--text)">${e.name}</b> <span style="color:#64748b">(${e.code})</span><br>
+          <span style="color:#64748b">${e.designation||'—'} · ${e.machine||'—'} · ${e.resp||'—'}${e.salary?' · ₹'+e.salary:''}</span>
+        </div>`).join('')}
+    </div>
+    <button class="submit-btn" style="margin-top:12px" onclick="confirmBulkImportTeam()">✅ ${_bulkImportParsed.length} कर्मचारी Import करें</button>`;
+}
+
+async function confirmBulkImportTeam(){
+  if(!_bulkImportParsed.length) return;
+  const cid=myCompanyId()==='ALL'?'gls':myCompanyId();
+  const label=SESSION.company||'GLS';
+  let saved=0, failed=0;
+  for(const [i,e] of _bulkImportParsed.entries()){
+    try{
+      const id='e'+Date.now().toString(36)+i;
+      await fbSet('employees/'+id,{
+        id, name:e.name, empId:e.code,
+        sec:e.designation||'STAFF', designation:e.designation||'',
+        mc:e.machine||'—', resp:e.resp||'',
+        monthlySalary:e.salary?Number(e.salary)||0:0,
+        woff:'SUN', status:'active',
+        companyId:cid, companyLabel:label,
+        ms:Array(31).fill('D')
+      });
+      saved++;
+    }catch(err){ failed++; console.error('Bulk import error:',e.name,err); }
+  }
+  _bulkImportParsed=[];
+  closeModal();
+  toast(`✅ ${saved} कर्मचारी Team में जुड़ गए!${failed?' '+failed+' fail हुए.':''}`);
+  renderTeam();
+  refreshAll();
+}
+
 function openAddEmpForm(){
   const secOpts=Object.entries(SEC).map(([k,v])=>`<option value="${k}">${v.hi}</option>`).join('');
   openModal(`<div class="modal-handle"></div>
@@ -11298,6 +11496,8 @@ async function addEmployee(){
   if(sec==='MGR' && !isAdmin()){ toast('❌ Manager section में सिर्फ Admin जोड़ सकते हैं'); return; }
   const id='e'+Date.now().toString(36);
   const emp={id,name,empId:code,sec,mc,resp,woff,status:'active',
+    companyId:myCompanyId()==='ALL'?'gls':myCompanyId(),
+    companyLabel:SESSION.company||'GLS',
     ms:Array(31).fill('D')};
   if(phone) emp.phone=phone;
   await fbUpdate(`employees/${id}`,emp);
