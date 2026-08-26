@@ -4320,8 +4320,22 @@ function switchViewCompany(companyId){
   toast(companyId==='ALL'?'🌐 सभी Companies दिख रही हैं':'🏢 अब सिर्फ इस Company का data दिख रहा है');
   refreshAll();
 }
+function _normMobileKey(m){ return (m||'').toString().replace('+91','').replace(/[^0-9]/g,''); }
 function getEmps(){
   const all=_cache.employees||[];
+  if(isAdmin()){
+    const cid=SESSION.viewCompanyId||'ALL';
+    if(cid==='ALL') return all;
+    return all.filter(e=>_normCompanyId(e.companyId)===cid); // admin sees everyone under that company, any manager
+  }
+  if(SESSION.role==='manager' && SESSION.mobile){
+    const key=_normMobileKey(SESSION.mobile);
+    return all.filter(e=>e.managerId===key); // ONLY employees this Manager personally added
+  }
+  if(SESSION.role==='member' && SESSION.managerId){
+    return all.filter(e=>e.managerId===SESSION.managerId); // same team as their Manager
+  }
+  // Legacy employee-code system (old Workers/Managers/Supervisors/Admin default) — unchanged, company-wide
   const cid=myCompanyId();
   if(cid==='ALL') return all;
   return all.filter(e=>_normCompanyId(e.companyId)===cid);
@@ -5270,6 +5284,7 @@ function _launchAsNewUser(userData){
   SESSION.role=userData.role;
   SESSION.company=userData.company||'';
   SESSION.companyId=_normCompanyId(userData.company);
+  SESSION.managerId=userData.managerId||'';
   SESSION.mobile=userData.mobile;
   SESSION.newUser=true;
   SESSION.loginAt=new Date().toISOString();
@@ -11456,11 +11471,12 @@ async function confirmBulkImportTeam(){
   if(!_bulkImportParsed.length) return;
   const cid=myCompanyId()==='ALL'?'gls':myCompanyId();
   const label=SESSION.company||'GLS';
+  const mgrId=(SESSION.role==='manager' && SESSION.mobile)?_normMobileKey(SESSION.mobile):'';
   let saved=0, failed=0;
   for(const [i,e] of _bulkImportParsed.entries()){
     try{
       const id='e'+Date.now().toString(36)+i;
-      await fbSet('employees/'+id,{
+      const rec={
         id, name:e.name, empId:e.code,
         sec:e.designation||'STAFF', designation:e.designation||'',
         mc:e.machine||'—', resp:e.resp||'',
@@ -11468,7 +11484,9 @@ async function confirmBulkImportTeam(){
         woff:'SUN', status:'active',
         companyId:cid, companyLabel:label,
         ms:Array(31).fill('D')
-      });
+      };
+      if(mgrId) rec.managerId=mgrId;
+      await fbSet('employees/'+id,rec);
       saved++;
     }catch(err){ failed++; console.error('Bulk import error:',e.name,err); }
   }
@@ -11518,6 +11536,7 @@ async function addEmployee(){
     companyId:myCompanyId()==='ALL'?'gls':myCompanyId(),
     companyLabel:SESSION.company||'GLS',
     ms:Array(31).fill('D')};
+  if(SESSION.role==='manager' && SESSION.mobile){ emp.managerId=_normMobileKey(SESSION.mobile); }
   if(phone) emp.phone=phone;
   await fbUpdate(`employees/${id}`,emp);
   closeModal(); toast(`✅ ${name} जोड़ा गया`);
