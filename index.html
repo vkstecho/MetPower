@@ -6473,6 +6473,7 @@ function updateSyncTime(){
 }
 
 async function showProfile(){
+ try{
   const e=myEmp();
   if(isAdmin()){
     openModal(`<div class="modal-handle"></div>
@@ -6569,6 +6570,17 @@ async function showProfile(){
       </button>
     </div>`);
   }
+ }catch(ex){
+   console.error('showProfile error:',ex);
+   openModal(`<div class="modal-handle"></div>
+   <div style="text-align:center;padding:10px 0">
+     <div style="font-size:18px;font-weight:900;color:#fff">${SESSION.name||'—'}</div>
+     <button class="profile-action danger" onclick="doLogout()" style="margin-top:16px;justify-content:center">
+       <div class="pa-icon" style="background:rgba(244,63,94,.12)">🚪</div>
+       <div><div class="pa-label">Logout</div></div>
+     </button>
+   </div>`);
+ }
 }
 
 function openExtendAccessModal(){
@@ -6808,10 +6820,7 @@ function isGLSUser(){ return isAdmin() || SESSION.company === 'GLS' || SESSION.c
 // ════════════════════════════════════════
 async function renderHome(){
   const emps=getEmps().filter(e=>e.status!=='resigned' && Array.isArray(e.ms) && e.ms.length > 0);
-  // Non-GLS users get guest view
-  if(!isGLSUser()){
-    SESSION.role='guest'; buildNav(); renderAll(); return;
-  }
+  const stillLoading = _cache.employees === null; // Firebase hasn't responded yet — genuinely loading
   if(!emps || emps.length===0){
     document.getElementById('homeDateLbl').textContent =
       TODAY_DATE.toLocaleDateString(_lang==='en'?'en-IN':'hi-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
@@ -6819,7 +6828,17 @@ async function renderHome(){
       <div class="stat-card"><div class="stat-val" style="color:var(--muted)">...</div><div class="stat-lbl" id="dayStatLbl">${_lang==='en'?'Day Shift':'दिन शिफ्ट'}</div></div>
       <div class="stat-card"><div class="stat-val" style="color:var(--muted)">...</div><div class="stat-lbl" id="nightStatLbl">${_lang==='en'?'Night Shift':'रात शिफ्ट'}</div></div>
       <div class="stat-card"><div class="stat-val" style="color:var(--muted)">...</div><div class="stat-lbl" id="leaveStatLbl">${_lang==='en'?'On Leave':'छुट्टी पर'}</div></div>`;
-    document.getElementById('homeSections').innerHTML='<div style="text-align:center;padding:20px;color:var(--muted2)">🔄 '+(_lang==='en'?'Loading data from Firebase...':'Firebase से डेटा लोड हो रहा है...')+'</div>';
+    if(stillLoading){
+      document.getElementById('homeSections').innerHTML='<div style="text-align:center;padding:20px;color:var(--muted2)">🔄 '+(_lang==='en'?'Loading data from Firebase...':'Firebase से डेटा लोड हो रहा है...')+'</div>';
+    } else if(isAdminOrMgr()){
+      document.getElementById('homeSections').innerHTML=`<div style="text-align:center;padding:30px 16px;color:var(--muted2)">
+        <div style="font-size:36px;margin-bottom:10px">👥</div>
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">${_lang==='en'?'Your team is empty':'आपकी Team में अभी कोई नहीं है'}</div>
+        <div style="font-size:12px;line-height:1.6">${_lang==='en'?'Add employees from the Team tab to get started.':'शुरू करने के लिए टीम टैब से कर्मचारी जोड़ें।'}</div>
+      </div>`;
+    } else {
+      document.getElementById('homeSections').innerHTML='<div style="text-align:center;padding:20px;color:var(--muted2)">'+(_lang==='en'?'No data yet.':'अभी कोई डेटा नहीं है।')+'</div>';
+    }
     document.getElementById('homeRoster').innerHTML='';
     return;
   }
