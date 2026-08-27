@@ -2600,25 +2600,27 @@ setTimeout(_forceLogin, 10000);
 <!-- ── PENDING (ADMIN) ── -->
 <div class="tab" id="tab-pending">
   <div class="page-title" id="pageTitlePending">अनुमोदन पेंडिंग</div>
-  <button id="smsSettingsBtn" onclick="openSmsSettings()" style="display:none;width:100%;padding:14px;border-radius:12px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.08);color:var(--green);font-family:'Noto Sans Devanagari',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:14px">
-    ⚙️ SMS Notification Settings
-  </button>
-  <div class="stitle">📱 Login Requests (Admin Approval)</div>
-  <div id="pendingLoginRequests"></div>
-  <div class="stitle">📱 नए Device Requests</div>
-  <div id="pendingDevices"></div>
-      <div style="font-size:12px;font-weight:800;color:#a855f7;letter-spacing:.5px;margin:16px 0 8px">
-        &#128273; NEW MANAGER REGISTRATIONS
-      </div>
-      <div id="mgrApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
-      <div id="myTeamApprovalsBlock" style="display:none">
-        <div style="font-size:12px;font-weight:800;color:#60a5fa;letter-spacing:.5px;margin:16px 0 8px">
-          &#128101; मेरी TEAM &mdash; PENDING MEMBERS
+  <div id="adminOnlyPendingBlock" style="display:none">
+    <button id="smsSettingsBtn" onclick="openSmsSettings()" style="display:none;width:100%;padding:14px;border-radius:12px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.08);color:var(--green);font-family:'Noto Sans Devanagari',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:14px">
+      ⚙️ SMS Notification Settings
+    </button>
+    <div class="stitle">📱 Login Requests (Admin Approval)</div>
+    <div id="pendingLoginRequests"></div>
+    <div class="stitle">📱 नए Device Requests</div>
+    <div id="pendingDevices"></div>
+        <div style="font-size:12px;font-weight:800;color:#a855f7;letter-spacing:.5px;margin:16px 0 8px">
+          &#128273; NEW MANAGER REGISTRATIONS
         </div>
-        <div id="myTeamApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
-      </div>
-  <div class="stitle">👤 नए रजिस्ट्रेशन</div>
-  <div id="pendingRegs"></div>
+        <div id="mgrApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+    <div class="stitle">👤 नए रजिस्ट्रेशन</div>
+    <div id="pendingRegs"></div>
+  </div>
+  <div id="myTeamApprovalsBlock" style="display:none">
+    <div style="font-size:12px;font-weight:800;color:#60a5fa;letter-spacing:.5px;margin:16px 0 8px">
+      &#128101; मेरी TEAM &mdash; PENDING MEMBERS
+    </div>
+    <div id="myTeamApprovalsSection"><div class="empty-text" style="padding:12px;font-size:12px">Loading...</div></div>
+  </div>
   <div class="stitle">🌴 छुट्टी आवेदन</div>
   <div id="pendingLeaves"></div>
   <div class="stitle">📋 रिपोर्ट</div>
@@ -4340,7 +4342,56 @@ function getEmps(){
   if(cid==='ALL') return all;
   return all.filter(e=>_normCompanyId(e.companyId)===cid);
 }
+// ════════════════════════════════════════
+// SHIFT & MACHINE CONFIGURATION (per-Manager, GLS included)
+// ════════════════════════════════════════
+function myShiftConfigKey(companyIdOverride){
+  if(isAdmin()){
+    const cid=companyIdOverride||SESSION.viewCompanyId;
+    return cid && cid!=='ALL' ? 'company:'+cid : null;
+  }
+  if(SESSION.role==='manager' && SESSION.mobile) return 'mgr:'+_normMobileKey(SESSION.mobile);
+  if(SESSION.role==='member' && SESSION.managerId) return 'mgr:'+SESSION.managerId;
+  return 'company:'+myCompanyId(); // legacy employee-code system — shared at company level
+}
+function _defaultShiftConfig(){
+  return {
+    shiftCount: 2,
+    shifts: [
+      {code:'D', label:'Day', start:'08:00', end:'20:00'},
+      {code:'N', label:'Night', start:'20:00', end:'08:00'}
+    ],
+    metallisers: ['Metalliser-1','Metalliser-2'],
+    slitters: ['Slitter-1','Slitter-2'],
+    updatedAt: null
+  };
+}
+let _shiftConfigCache={};
+async function getShiftConfig(keyOverride){
+  const key=keyOverride||myShiftConfigKey();
+  if(!key) return _defaultShiftConfig();
+  if(_shiftConfigCache[key]) return _shiftConfigCache[key];
+  try{
+    const rec=await fbGet('shiftConfigs/'+key.replace(/[:.#$\[\]]/g,'_'));
+    const cfg=rec||_defaultShiftConfig();
+    _shiftConfigCache[key]=cfg;
+    return cfg;
+  }catch(e){ return _defaultShiftConfig(); }
+}
+async function saveShiftConfig(cfg,keyOverride){
+  const key=keyOverride||myShiftConfigKey();
+  if(!key){ toast('❌ Company select करें पहले'); return false; }
+  cfg.updatedAt=new Date().toISOString();
+  cfg.updatedBy=SESSION.name;
+  try{
+    await fbSet('shiftConfigs/'+key.replace(/[:.#$\[\]]/g,'_'),cfg);
+    _shiftConfigCache[key]=cfg;
+    return true;
+  }catch(e){ toast('❌ Error: '+e.message); return false; }
+}
+
 function getSchedules(){ return _cache.schedules   || {}; }
+
 function getLeaves(){
   const scopedIds=new Set(getEmps().map(e=>e.id));
   return (_cache.leaves||[]).filter(l=>scopedIds.has(l.empId));
@@ -6487,6 +6538,117 @@ function updateSyncTime(){
   if(el) el.textContent=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
 
+// ════════════════════════════════════════
+// SHIFT & MACHINE SETTINGS UI
+// ════════════════════════════════════════
+let _shiftDraft=null;
+
+async function openShiftSettings(){
+  if(isAdmin() && (!SESSION.viewCompanyId || SESSION.viewCompanyId==='ALL')){
+    toast('⚠️ पहले header से एक Company चुनें');
+    return;
+  }
+  toast('⏳ Loading...');
+  const cfg=await getShiftConfig();
+  _shiftDraft=JSON.parse(JSON.stringify(cfg)); // deep clone for editing
+  _renderShiftSettingsModal();
+}
+
+function _renderShiftSettingsModal(){
+  const d=_shiftDraft;
+  openModal(`<div class="modal-handle"></div>
+  <div class="modal-title">⚙️ Shift & Machine Settings</div>
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">
+    ${isAdmin()?'Company: <b style="color:var(--text)">'+(SESSION.viewCompanyId||'').toUpperCase()+'</b>':'आपकी अपनी Team के लिए'}
+  </div>
+
+  <div class="field">
+    <label>Shift Pattern</label>
+    <select id="ss_shiftCount" onchange="_onShiftCountChange(this.value)">
+      <option value="2"${d.shiftCount===2?' selected':''}>2 Shifts (Day / Night)</option>
+      <option value="3"${d.shiftCount===3?' selected':''}>3 Shifts (A / B / C)</option>
+    </select>
+  </div>
+  <div id="ss_shiftTimings">${_renderShiftTimingRows()}</div>
+
+  <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
+  <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
+  <button class="cancel-btn" style="margin-top:6px" onclick="_addMachine('metallisers')">+ Metalliser जोड़ें</button>
+
+  <div style="font-size:12px;font-weight:800;color:#38bdf8;margin:18px 0 8px">✂️ Slitter Machines</div>
+  <div id="ss_slitters">${_renderMachineRows('slitters')}</div>
+  <button class="cancel-btn" style="margin-top:6px" onclick="_addMachine('slitters')">+ Slitter जोड़ें</button>
+
+  <div style="font-size:11px;color:#64748b;margin-top:14px;line-height:1.6">
+    💡 Machine names sequential होना जरूरी नहीं — जैसे "Met-1, Met-3, Met-5" भी चल सकता है।
+  </div>
+
+  <button class="submit-btn" style="margin-top:16px" onclick="_saveShiftSettings()">✅ Save करें</button>
+  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
+}
+
+function _renderShiftTimingRows(){
+  return _shiftDraft.shifts.map((s,i)=>`
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+      <input type="text" value="${s.code}" placeholder="Code" maxlength="2" style="width:50px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;text-align:center;font-weight:800" oninput="_shiftDraft.shifts[${i}].code=this.value.toUpperCase()">
+      <input type="text" value="${s.label}" placeholder="नाम (जैसे Day)" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].label=this.value">
+      <input type="time" value="${s.start}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].start=this.value">
+      <span style="color:#64748b;font-size:11px">to</span>
+      <input type="time" value="${s.end}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].end=this.value">
+    </div>`).join('');
+}
+
+function _renderMachineRows(field){
+  return _shiftDraft[field].map((m,i)=>`
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+      <input type="text" value="${m}" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.${field}[${i}]=this.value">
+      <button onclick="_removeMachine('${field}',${i})" style="width:32px;height:32px;border-radius:8px;border:1px solid rgba(244,63,94,.3);background:rgba(244,63,94,.08);color:#f43f5e;font-size:14px;cursor:pointer">✕</button>
+    </div>`).join('');
+}
+
+function _onShiftCountChange(val){
+  const n=Number(val);
+  _shiftDraft.shiftCount=n;
+  if(n===2){
+    _shiftDraft.shifts=[
+      {code:'D',label:'Day',start:'08:00',end:'20:00'},
+      {code:'N',label:'Night',start:'20:00',end:'08:00'}
+    ];
+  }else{
+    _shiftDraft.shifts=[
+      {code:'A',label:'A Shift',start:'06:00',end:'14:00'},
+      {code:'B',label:'B Shift',start:'14:00',end:'22:00'},
+      {code:'C',label:'C Shift',start:'22:00',end:'06:00'}
+    ];
+  }
+  document.getElementById('ss_shiftTimings').innerHTML=_renderShiftTimingRows();
+}
+
+function _addMachine(field){
+  const prefix=field==='metallisers'?'Metalliser-':'Slitter-';
+  _shiftDraft[field].push(prefix+(_shiftDraft[field].length+1));
+  document.getElementById('ss_'+field).innerHTML=_renderMachineRows(field);
+}
+function _removeMachine(field,idx){
+  _shiftDraft[field].splice(idx,1);
+  document.getElementById('ss_'+field).innerHTML=_renderMachineRows(field);
+}
+
+async function _saveShiftSettings(){
+  if(!_shiftDraft.metallisers.length && !_shiftDraft.slitters.length){
+    toast('⚠️ कम से कम एक Machine जोड़ें'); return;
+  }
+  for(const s of _shiftDraft.shifts){
+    if(!s.code||!s.label){ toast('⚠️ सभी Shift की Code और नाम भरें'); return; }
+  }
+  const ok=await saveShiftConfig(_shiftDraft);
+  if(ok){
+    closeModal();
+    toast('✅ Shift Settings save हो गईं');
+  }
+}
+
+
 async function showProfile(){
  try{
   const e=myEmp();
@@ -6524,6 +6686,11 @@ async function showProfile(){
         <div><div class="pa-label">SMS Settings</div><div class="pa-sub">Fast2SMS notification config</div></div>
         <div class="pa-arrow">›</div>
       </button>
+      <button class="profile-action" onclick="closeModal();openShiftSettings()">
+        <div class="pa-icon" style="background:rgba(168,85,247,.12)">⚙️</div>
+        <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">${SESSION.viewCompanyId&&SESSION.viewCompanyId!=='ALL'?'चुनी गई Company के लिए':'पहले header से Company चुनें'}</div></div>
+        <div class="pa-arrow">›</div>
+      </button>
       <button class="profile-action danger" onclick="doLogout()" style="margin-top:4px">
         <div class="pa-icon" style="background:rgba(244,63,94,.12)">🚪</div>
         <div><div class="pa-label">Logout</div><div class="pa-sub">सभी sessions साफ़ करें</div></div>
@@ -6543,21 +6710,33 @@ async function showProfile(){
     </div>`);
   } else {
     // Fetch live validity from Firebase
-    let daysLeft = 0, expiryStr = '', expiryDate = '';
+    let daysLeft = 0, expiryStr = '', expiryDate = '', hasExpiry = false;
     try{
-      const empObjId = myEmp()?.id || SESSION.empObjId;
-      if(empObjId){
-        const approval = await fbGet('deviceApprovals/' + empObjId);
-        if(approval && approval.validTill){
-          daysLeft = Math.ceil((new Date(approval.validTill) - new Date()) / 86400000);
-          expiryDate = new Date(approval.validTill).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
+      if(SESSION.role==='manager' || SESSION.role==='member'){
+        const mobileKey = _normMobileKey(SESSION.mobile);
+        const rec = await fbGet('mobileUsers/' + mobileKey);
+        if(rec && rec.validTill){
+          hasExpiry = true;
+          daysLeft = Math.ceil((new Date(rec.validTill) - new Date()) / 86400000);
+          expiryDate = new Date(rec.validTill).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
           expiryStr = expiryDate;
+        }
+      } else {
+        const empObjId = myEmp()?.id || SESSION.empObjId;
+        if(empObjId){
+          const approval = await fbGet('deviceApprovals/' + empObjId);
+          if(approval && approval.validTill){
+            hasExpiry = true;
+            daysLeft = Math.ceil((new Date(approval.validTill) - new Date()) / 86400000);
+            expiryDate = new Date(approval.validTill).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
+            expiryStr = expiryDate;
+          }
         }
       }
     }catch(ex){}
-    const color = daysLeft<=0?'#f43f5e':daysLeft<=7?'#f43f5e':daysLeft<=15?'#f97316':'#22c55e';
-    const icon  = daysLeft<=0?'🔴':daysLeft<=7?'⚠️':'🟢';
-    const msg   = daysLeft<=0?'Validity Expire हो गई — Admin से मिलें':daysLeft<=7?`सिर्फ ${daysLeft} दिन बाकी — जल्दी Admin से मिलें`:`${daysLeft} दिन बाकी`;
+    const color = !hasExpiry?'#22c55e':daysLeft<=7?'#f43f5e':daysLeft<=15?'#f97316':'#22c55e';
+    const icon  = !hasExpiry?'🟢':daysLeft<=0?'🔴':daysLeft<=7?'⚠️':'🟢';
+    const msg   = !hasExpiry?'कोई Expiry तय नहीं है':daysLeft<=0?'Validity Expire हो गई — Admin से मिलें':daysLeft<=7?`सिर्फ ${daysLeft} दिन बाकी — जल्दी Admin से मिलें`:`${daysLeft} दिन बाकी`;
     const empRec = myEmp();
     const secLabel = empRec ? (secName(empRec.sec) || empRec.sec) : '';
     const roleLabel = isMgr()?'🏅 Manager':isSupervisor()?'👁️ Supervisor':'👤 User';
@@ -6578,6 +6757,11 @@ async function showProfile(){
           </div>
         </div>
       </div>
+      ${isMgr()?`<button class="profile-action" onclick="openShiftSettings()">
+        <div class="pa-icon" style="background:rgba(168,85,247,.12)">⚙️</div>
+        <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">Shifts, Metalliser/Slitter setup</div></div>
+        <div class="pa-arrow">›</div>
+      </button>`:''}
       <button class="profile-action danger" onclick="doLogout()">
         <div class="pa-icon" style="background:rgba(244,63,94,.12)">🚪</div>
         <div><div class="pa-label">Logout</div><div class="pa-sub">सभी sessions साफ़ करें</div></div>
@@ -9533,8 +9717,10 @@ function renderReports(){
   let fbList = getReports();
   if(!isAdmin()) fbList = fbList.filter(r=>r.status==='approved'||r.reportedById===SESSION.empObjId);
 
-  // Build legacy NCR cards (always visible to everyone)
-  const legacyNcrs = _buildNcrCards();
+  // Build legacy NCR cards — only for GLS's own legacy viewers (Admin / old employee-code roles).
+  // New self-registered Manager/Member accounts should never see this hardcoded historical data.
+  const showLegacyNcrs = isAdmin() || !(SESSION.role==='manager' || SESSION.role==='member');
+  const legacyNcrs = showLegacyNcrs ? _buildNcrCards() : [];
 
   // Combine: Firebase reports first, then legacy NCRs (avoid duplicates by NCR number)
   const fbNcrNums = new Set(fbList.filter(r=>r.type==='ncr'&&r.ncrNum).map(r=>String(r.ncrNum)));
@@ -9972,8 +10158,11 @@ async function submitImpInfo(){
 // PENDING (ADMIN)
 // ════════════════════════════════════════
 function renderPendingDevices(){
-  setTimeout(renderManagerApprovals,100);
+  const adminBlock=document.getElementById('adminOnlyPendingBlock');
+  if(adminBlock) adminBlock.style.display=isAdmin()?'block':'none';
   setTimeout(renderMyTeamApprovals,100);
+  if(!isAdmin()) return; // rest of this function only populates Admin-only sections
+  setTimeout(renderManagerApprovals,100);
   const el = document.getElementById('pendingDevices');
   if(!el) return;
   fbGet('deviceChangeRequests').then(data=>{
