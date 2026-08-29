@@ -4358,14 +4358,64 @@ function _defaultShiftConfig(){
   return {
     shiftCount: 2,
     shifts: [
-      {code:'D', label:'Day', start:'08:00', end:'20:00'},
-      {code:'N', label:'Night', start:'20:00', end:'08:00'}
+      {code:'D', label:'दिन शिफ्ट', start:'08:00', end:'20:00'},
+      {code:'N', label:'रात शिफ्ट', start:'20:00', end:'08:00'}
     ],
-    metallisers: ['Metalliser-1','Metalliser-2'],
-    slitters: ['Slitter-1','Slitter-2'],
+    metallisers: ['M1','M2'],
+    slitters: ['S1','S2'],
     updatedAt: null
   };
 }
+function getShiftConfigSync(){
+  const key=myShiftConfigKey();
+  if(key && _shiftConfigCache[key]) return _shiftConfigCache[key];
+  return _defaultShiftConfig();
+}
+function warmShiftConfigCache(){
+  getShiftConfig().catch(()=>{}); // fire-and-forget, populates _shiftConfigCache for sync use
+}
+function getSchedFilteredEmps(){
+  const all=getEmps();
+  if(schedSec==='ALL') return all;
+  if(schedSec==='M12') return all.filter(e=>e.sec==='M1'||e.sec==='M2'); // legacy GLS grouped chip
+  if(schedSec==='S12') return all.filter(e=>e.sec==='S1'||e.sec==='S2'); // legacy GLS grouped chip
+  if(schedSec==='GRP:metalliser'){
+    const cfg=getShiftConfigSync();
+    return all.filter(e=>(cfg.metallisers||[]).includes(e.sec));
+  }
+  if(schedSec==='GRP:slitter'){
+    const cfg=getShiftConfigSync();
+    return all.filter(e=>(cfg.slitters||[]).includes(e.sec));
+  }
+  return all.filter(e=>e.sec===schedSec);
+}
+
+function _buildMachineChips(kind){
+  const cfg=getShiftConfigSync();
+  const emps=getEmps();
+  const chips=[{code:'ALL',label:_lang==='en'?'All':'सभी'}];
+  const mets=cfg.metallisers||[];
+  const slits=cfg.slitters||[];
+  const hasSec=(code)=>emps.some(e=>e.sec===code);
+  if(kind==='sched'){
+    if(mets.length>1 && mets.some(hasSec)) chips.push({code:'GRP:metalliser',label:_lang==='en'?'Metalliser (All)':'मेटलाइज़र (सभी)'});
+    else if(mets.length===1 && hasSec(mets[0])) chips.push({code:mets[0],label:secName(mets[0])||mets[0]});
+    if(slits.length>1 && slits.some(hasSec)) chips.push({code:'GRP:slitter',label:_lang==='en'?'Slitter (All)':'स्लिटर (सभी)'});
+    else if(slits.length===1 && hasSec(slits[0])) chips.push({code:slits[0],label:secName(slits[0])||slits[0]});
+  } else {
+    mets.forEach(m=>{ if(hasSec(m)) chips.push({code:m,label:secName(m)||m}); });
+    slits.forEach(s=>{ if(hasSec(s)) chips.push({code:s,label:secName(s)||s}); });
+  }
+  if(hasSec('SUP')) chips.push({code:'SUP',label:'Supervisor'});
+  if(hasSec('MGR')) chips.push({code:'MGR',label:'Manager'});
+  return chips;
+}
+function _renderDynamicChips(containerId, chips, activeCode, clickFnName){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  el.innerHTML=chips.map(c=>`<div class="chip${c.code===activeCode?' on':''}" onclick="${clickFnName}('${c.code.replace(/'/g,"\\'")}',this)">${c.label}</div>`).join('');
+}
+
 let _shiftConfigCache={};
 async function getShiftConfig(keyOverride){
   const key=keyOverride||myShiftConfigKey();
@@ -6288,6 +6338,7 @@ function showLoginErr(msg){
 // ════════════════════════════════════════
 async function launchApp(){
   try{
+  warmShiftConfigCache();
   // ── Restore Firebase Auth if session exists but auth is cold ──
   try{
     if(window._fbAuth && !window._fbAuth.currentUser && SESSION.role){
@@ -8296,6 +8347,7 @@ function setSchedSec(s,el){
   el.classList.add('on'); renderSchedule(); setTimeout(syncStickyTop,80);
 }
 function renderSchedule(){
+  _renderDynamicChips('schedFilter', _buildMachineChips('sched'), schedSec, 'setSchedSec');
   const _d1=new Date(TODAY_STR+'T00:00:00'); _d1.setFullYear(_d1.getFullYear()-1);
   const _d2=new Date(TODAY_STR+'T00:00:00'); _d2.setFullYear(_d2.getFullYear()+1);
   const SCHED_MIN=_d1.toISOString().split('T')[0];
@@ -8319,10 +8371,7 @@ function renderSchedule(){
   document.getElementById('schedLbl').textContent=`${fmtShort(dates[0])} – ${fmtShort(dates[dates.length-1])}`;
 
   const allEmps = (
-    schedSec==='ALL' ? getEmps() :
-    schedSec==='M12' ? getEmps().filter(e=>e.sec==='M1'||e.sec==='M2') :
-    schedSec==='S12' ? getEmps().filter(e=>e.sec==='S1'||e.sec==='S2') :
-    getEmps().filter(e=>e.sec===schedSec)
+    getSchedFilteredEmps()
   ).filter(e=>e.status!=='resigned' && Array.isArray(e.ms) && e.ms.length > 0);
 
   // ── Build ordered display groups ──
@@ -8370,6 +8419,28 @@ function renderSchedule(){
       sort: (a,b) => getEmpDisplayOrder(a) - getEmpDisplayOrder(b)
     },
   ];
+
+  // ── Fallback: any employee whose sec isn't one of GLS's fixed codes above ──
+  // (this is every employee for any new self-registered company's own machines)
+  const _coveredSecs = new Set(['M1','M2','S1','S2','SUP','MGR']);
+  const _extraSecs = Array.from(new Set(allEmps.map(e=>e.sec).filter(s=>s && !_coveredSecs.has(s))));
+  _extraSecs.forEach(secVal=>{
+    DISPLAY_ORDER.push({
+      key:'dyn_'+secVal,
+      label:'🏭 '+(secName(secVal)||secVal),
+      color:'#94a3b8',
+      filter: e => e.sec===secVal,
+      sort: (a,b) => (a.name||'').localeCompare(b.name||'')
+    });
+  });
+  // Employees with no sec at all (shouldn't normally happen, but keep them visible rather than hiding data)
+  DISPLAY_ORDER.push({
+    key:'dyn_none',
+    label:'👤 '+(_lang==='en'?'Unassigned':'अवर्गीकृत'),
+    color:'#64748b',
+    filter: e => !e.sec,
+    sort: (a,b) => (a.name||'').localeCompare(b.name||'')
+  });
 
   // Build date cells for BOTH sticky header and table thead
   const dateCellsHtml = dates.map(d=>{
@@ -8731,10 +8802,7 @@ function sortTrends(col){
     dates=Array.from({length:16},(_,i)=>addDays(TODAY_STR,schedOff+i));
   }
   const allEmps = (
-    schedSec==='ALL' ? getEmps() :
-    schedSec==='M12' ? getEmps().filter(e=>e.sec==='M1'||e.sec==='M2') :
-    schedSec==='S12' ? getEmps().filter(e=>e.sec==='S1'||e.sec==='S2') :
-    getEmps().filter(e=>e.sec===schedSec)
+    getSchedFilteredEmps()
   ).filter(e=>e.status!=='resigned' && Array.isArray(e.ms) && e.ms.length > 0);
   renderShiftTrends(allEmps, dates);
 }
@@ -8750,10 +8818,7 @@ function setTrendBar(metric){
     dates=Array.from({length:16},(_,i)=>addDays(TODAY_STR,schedOff+i));
   }
   const allEmps = (
-    schedSec==='ALL' ? getEmps() :
-    schedSec==='M12' ? getEmps().filter(e=>e.sec==='M1'||e.sec==='M2') :
-    schedSec==='S12' ? getEmps().filter(e=>e.sec==='S1'||e.sec==='S2') :
-    getEmps().filter(e=>e.sec===schedSec)
+    getSchedFilteredEmps()
   ).filter(e=>e.status!=='resigned' && Array.isArray(e.ms) && e.ms.length > 0);
   renderShiftTrends(allEmps, dates);
 }
@@ -10619,6 +10684,7 @@ let _teamSec='ALL';
 function setTeamSec(s,el){ _teamSec=s; document.querySelectorAll('#teamFilter .chip').forEach(c=>c.classList.remove('on')); el.classList.add('on'); renderTeam(); document.getElementById('tab-team')?.scrollIntoView({behavior:'smooth',block:'start'}); }
 
 function renderTeam(search=''){
+  _renderDynamicChips('teamFilter', _buildMachineChips('team'), _teamSec, 'setTeamSec');
   document.getElementById('teamAddBtn').innerHTML = isAdminOrMgr()
     ? `<div style="display:flex;gap:8px;margin-bottom:14px">
         <button class="action-primary" style="flex:1" onclick="openAddEmpForm()">+ नया कर्मचारी जोड़ें</button>
@@ -11686,8 +11752,17 @@ async function confirmBulkImportTeam(){
   refreshAll();
 }
 
+function _buildSecOptions(selectedSec){
+  const cfg=getShiftConfigSync();
+  const opts=[];
+  (cfg.metallisers||[]).forEach(m=>opts.push(`<option value="${m}"${selectedSec===m?' selected':''}>${secName(m)||m}</option>`));
+  (cfg.slitters||[]).forEach(s=>opts.push(`<option value="${s}"${selectedSec===s?' selected':''}>${secName(s)||s}</option>`));
+  opts.push(`<option value="SUP"${selectedSec==='SUP'?' selected':''}>${secName('SUP')||'Supervisor'}</option>`);
+  opts.push(`<option value="MGR"${selectedSec==='MGR'?' selected':''}>${secName('MGR')||'Manager'}</option>`);
+  return opts.join('');
+}
 function openAddEmpForm(){
-  const secOpts=Object.entries(SEC).map(([k,v])=>`<option value="${k}">${v.hi}</option>`).join('');
+  const secOpts=_buildSecOptions(null);
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">👤 नया कर्मचारी</div>
   <div class="grid2">
@@ -11733,7 +11808,7 @@ async function addEmployee(){
 
 function openEditEmpForm(empId){
   const e=getEmps().find(x=>x.id===empId); if(!e) return;
-  const secOpts=Object.entries(SEC).map(([k,v])=>`<option value="${k}"${e.sec===k?' selected':''}>${v.hi}</option>`).join('');
+  const secOpts=_buildSecOptions(e.sec);
   const roleOpts=['Team Member','Sr. Team Member','Jr. Team Member','Trainee','Supervisor','Manager','Admin'].map(r=>`<option${(e.designation||'')=== r?' selected':''}>${r}</option>`).join('');
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">✏️ ${e.name} संपादित करें</div>
@@ -13660,9 +13735,12 @@ function confirmLeaveWithReason(empId, empName, date, currentShift){
 function editShiftCell(empId, empName, date, currentShift){
   if(!isAdminOrMgr()){ return; }
 
+  const _cfg = getShiftConfigSync();
+  const _shiftColors = [
+    {bg:'#f59e0b',color:'#000'}, {bg:'#4338ca',color:'#fff'}, {bg:'#0d9488',color:'#ccfbf1'}
+  ];
   const SHIFT_OPTIONS = [
-    {v:'D',   label:'दिन शिफ्ट',       bg:'#f59e0b', color:'#000'},
-    {v:'N',   label:'रात शिफ्ट',       bg:'#4338ca', color:'#fff'},
+    ...(_cfg.shifts||[]).map((s,i)=>({v:s.code, label:s.label+(s.start&&s.end?` (${s.start}–${s.end})`:''), bg:_shiftColors[i%3].bg, color:_shiftColors[i%3].color})),
     {v:'O',   label:'साप्ताहिक छुट्टी', bg:'#334155', color:'#94a3b8'},
     {v:'L',   label:'Leave',            bg:'#9f1239', color:'#fda4af'},
     {v:'G',   label:'General Shift',    bg:'#0c4a6e', color:'#7dd3fc'},
