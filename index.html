@@ -6467,8 +6467,8 @@ async function buildNav(){
     {id:'home',      ico:'🏠', lbl:'होम',       lblEn:'Home',      roles:['worker','guest','manager','supervisor']},
     {id:'schedule',  ico:'📅', lbl:'शेड्यूल',   lblEn:'Schedule',  roles:['worker','manager','supervisor']},
     {id:'leave',     ico:'🏖️', lbl:'अवकाश',    lblEn:'Leave',     roles:['worker','manager']},
-    {id:'reports',   ico:'📋', lbl:'रिपोर्ट',   lblEn:'Reports',   roles:['admin','worker','manager','supervisor']},
-    {id:'todo',      ico:'✅', lbl:'To-Do',      lblEn:'To-Do',     roles:['admin','guest','worker','manager','supervisor']},
+    {id:'reports',   ico:'📋', lbl:'रिपोर्ट',   lblEn:'Reports',   roles:['worker','manager','supervisor']},
+    {id:'todo',      ico:'✅', lbl:'To-Do',      lblEn:'To-Do',     roles:['guest','worker','manager','supervisor']},
     {id:'pending',   ico:'⏳', lbl:'पेंडिंग',   lblEn:'Pending',   roles:['admin','manager']},
     {id:'team',      ico:'👥', lbl:'टीम',        lblEn:'Team',      roles:['admin','manager']},
   ];
@@ -9802,8 +9802,8 @@ function renderReports(){
 
   // Build legacy NCR cards — only for GLS's own legacy viewers (Admin / old employee-code roles).
   // New self-registered Manager/Member accounts should never see this hardcoded historical data.
-  const showLegacyNcrs = isAdmin() || !(SESSION.role==='manager' || SESSION.role==='member');
-  const legacyNcrs = showLegacyNcrs ? _buildNcrCards() : [];
+  // Legacy hardcoded NCR demo data — removed entirely, no longer shown to anyone
+  const legacyNcrs = [];
 
   // Combine: Firebase reports first, then legacy NCRs (avoid duplicates by NCR number)
   const fbNcrNums = new Set(fbList.filter(r=>r.type==='ncr'&&r.ncrNum).map(r=>String(r.ncrNum)));
