@@ -3738,11 +3738,29 @@ async function openEmpReorderPanel(){
       filter: e => e.sec==='MGR' },
   ];
 
+  const emps = getEmps().filter(e => e.status !== 'resigned');
+
+  // ── Fallback: any employee whose sec isn't one of GLS's fixed codes above ──
+  const _coveredSecs = new Set(['M1','M2','S1','S2','SUP','MGR']);
+  const _extraSecs = Array.from(new Set(emps.map(e=>e.sec).filter(s=>s && !_coveredSecs.has(s))));
+  _extraSecs.forEach(secVal=>{
+    GROUPS.push({
+      key:'dyn_'+secVal,
+      label:'🏭 '+(secName(secVal)||secVal),
+      color:'#94a3b8',
+      filter: e => e.sec===secVal
+    });
+  });
+  GROUPS.push({
+    key:'dyn_none',
+    label:'👤 '+(_lang==='en'?'Unassigned':'अवर्गीकृत'),
+    color:'#64748b',
+    filter: e => !e.sec
+  });
+
   // Role options per machine section
   const MET_ROLES  = [{v:'main','l':'⭐ Main Operator'},{v:'reliever','l':'🔄 Reliever'},{v:'assist','l':'🏭 Team Member'}];
   const SLIT_ROLES = [{v:'main','l':'⭐ Main Operator'},{v:'slit_rel','l':'🔄 Reliever'},{v:'assist','l':'✂️ Team Member'}];
-
-  const emps = getEmps().filter(e => e.status !== 'resigned');
   let groupsHtml = '';
 
   GROUPS.forEach(g => {
