@@ -2467,7 +2467,6 @@ setTimeout(_forceLogin, 10000);
     <button id="schedBuildBtn" onclick="openScheduleBuilder()" class="sched-admin-btn green">📋 Schedule बनाएं</button>
     <button id="printBtn" onclick="printSched()" class="sched-admin-btn">🖨️ प्रिंट</button>
     <button id="excelBtn" onclick="exportSchedExcel()" class="sched-admin-btn" style="border-color:rgba(34,197,94,.5);color:#22c55e;background:rgba(34,197,94,.07)">📊 Excel</button>
-    <button id="empUploadBtn" onclick="openExcelUpload()" class="sched-admin-btn blue">📤 Shift Upload</button>
     <button id="empUploadWizardBtn" onclick="openEmpUploadWizard()" class="sched-admin-btn" style="border-color:rgba(34,197,94,.4);color:var(--green);background:rgba(34,197,94,.06)">👤 Emp Upload</button>
     <button id="msToggleBtn" onclick="toggleSelectMode()" class="sched-admin-btn" style="border-color:rgba(167,139,250,.4);color:#a78bfa;background:rgba(167,139,250,.06)">☑️ Multi-Select</button>
     <button id="empReorderBtn" onclick="openEmpReorderPanel()" class="sched-admin-btn" style="border-color:rgba(168,85,247,.4);color:#c084fc;background:rgba(168,85,247,.08)">↕️ क्रम बदलें</button>
@@ -3606,8 +3605,14 @@ const SEC = {
 function secName(sec){
   if(!sec) return '';
   const s = SEC[sec];
-  if(!s) return sec;
-  return (typeof _lang !== 'undefined' && _lang === 'en') ? s.label : s.hi;
+  if(s) return (typeof _lang !== 'undefined' && _lang === 'en') ? s.label : s.hi;
+  // Generic pool categories from Excel imports / free-form section codes
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
+  const key = sec.toString().trim().toUpperCase();
+  if(key==='MET')  return isEn ? 'Met (All Metalliser)' : 'Met (सभी Metalliser)';
+  if(key==='SLIT') return isEn ? 'Slit (All Slitter)'   : 'Slit (सभी Slitter)';
+  if(key==='ALL')  return isEn ? 'Supervisor'            : 'Supervisor';
+  return sec;
 }
 
 const REPORT_TYPES = {
@@ -6829,6 +6834,11 @@ async function showProfile(){
       ${isMgr()?`<button class="profile-action" onclick="openShiftSettings()">
         <div class="pa-icon" style="background:rgba(168,85,247,.12)">⚙️</div>
         <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">Shifts, Metalliser/Slitter setup</div></div>
+        <div class="pa-arrow">›</div>
+      </button>`:''}
+      ${SESSION.role==='manager'?`<button class="profile-action" onclick="openChangeCompanyModal()">
+        <div class="pa-icon" style="background:rgba(96,165,250,.12)">🏢</div>
+        <div><div class="pa-label">Company Name बदलें</div><div class="pa-sub">वर्तमान: ${SESSION.company||'—'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
       <button class="profile-action danger" onclick="doLogout()">
@@ -10707,7 +10717,7 @@ function renderTeam(search=''){
     ? `<div style="display:flex;gap:8px;margin-bottom:14px">
         <button class="action-primary" style="flex:1" onclick="openAddEmpForm()">+ नया कर्मचारी जोड़ें</button>
         <button class="action-primary" style="flex:1;background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="openBulkImportTeam()">📊 Excel से Team Import</button>
-      </div>` : '';
+      </div>${SESSION.role==='manager'?`<button class="action-primary" style="width:100%;margin-bottom:14px;background:rgba(244,63,94,.1);color:#f43f5e;border:1px solid rgba(244,63,94,.3)" onclick="startDeleteAllMembersFlow()">🗑️ सभी Members Delete करें (OTP verify)</button>`:''}` : '';
 
   // Active employees only — those in the shift schedule (have ms array)
   let list = getEmps().filter(e => e.status !== 'resigned' && e.status !== 'left' && Array.isArray(e.ms) && e.ms.length > 0);
@@ -11639,7 +11649,8 @@ function openBulkImportTeam(){
     अपनी Excel/CSV file अपलोड करें जिसमें ये columns हों (कोई भी क्रम में, नाम केस-असंवेदनशील):<br>
     <b style="color:var(--text)">Name</b> (जरूरी) · <b style="color:var(--text)">E Code</b> (जरूरी) ·
     <b style="color:var(--text)">Designation</b> · <b style="color:var(--text)">Machine</b> ·
-    <b style="color:var(--text)">Responsibility</b> · <b style="color:var(--text)">Salary</b> (वैकल्पिक)
+    <b style="color:var(--text)">Responsibility</b> · <b style="color:var(--text)">Salary</b> (वैकल्पिक) ·
+    <b style="color:var(--text)">Mobile Number</b> (वैकल्पिक — दिया तो वो OTP से सीधे Login कर पाएंगे)
   </div>
   <button class="cancel-btn" style="margin-bottom:12px" onclick="downloadBulkImportTemplate()">⬇️ Sample Template Download करें</button>
   <input type="file" id="bulkImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleBulkImportFile(this.files[0])">
@@ -11649,7 +11660,7 @@ function openBulkImportTeam(){
 }
 
 function downloadBulkImportTemplate(){
-  const csv='Name,E Code,Designation,Machine,Responsibility,Salary\nRAM KUMAR,30001001,Operator,M-1,Operation,25000\nSHYAM LAL,30001002,Supervisor,ALL,Quality Check,\n';
+  const csv='Name,E Code,Designation,Machine,Responsibility,Salary,Mobile Number\nRAM KUMAR,30001001,Operator,M-1,Operation,25000,9876543210\nSHYAM LAL,30001002,Supervisor,ALL,Quality Check,,\n';
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
@@ -11712,11 +11723,14 @@ function _processBulkImportRows(rows){
     const machine=(_findCol(row,['machine','mc'])||'').toString().trim();
     const resp=(_findCol(row,['responsibility','resp'])||'').toString().trim();
     const salary=(_findCol(row,['salary','monthly salary'])||'').toString().trim();
+    let mobile=(_findCol(row,['mobile','mobile number','phone','phone number','contact'])||'').toString().trim().replace(/[^0-9]/g,'');
+    if(mobile.length===12 && mobile.startsWith('91')) mobile=mobile.slice(2); // strip country code if present
+    if(mobile.length!==10) mobile=''; // ignore invalid mobile, don't block the row
 
     if(!name || !code){ invalidCount++; return; }
     if(existingCodes.has(code) || seenInFile.has(code)){ dupCount++; return; }
     seenInFile.add(code);
-    _bulkImportParsed.push({name,code,designation,machine,resp,salary});
+    _bulkImportParsed.push({name,code,designation,machine,resp,salary,mobile});
   });
 
   if(!_bulkImportParsed.length){
@@ -11726,32 +11740,166 @@ function _processBulkImportRows(rows){
     return;
   }
 
+  const mobileCount=_bulkImportParsed.filter(e=>e.mobile).length;
   previewEl.innerHTML=`
     <div style="font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px">
       ✅ ${_bulkImportParsed.length} नए कर्मचारी तैयार ${dupCount?'· '+dupCount+' duplicate skip हुए':''}${invalidCount?'· '+invalidCount+' invalid rows skip हुए':''}
     </div>
+    ${mobileCount?`<div style="font-size:11px;color:#60a5fa;margin-bottom:8px">📱 ${mobileCount} में Mobile Number है — वो OTP से सीधे Login कर पाएंगे</div>`:''}
     <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px">
       ${_bulkImportParsed.map(e=>`
         <div style="padding:8px 10px;border-bottom:1px solid var(--border2);font-size:12px">
-          <b style="color:var(--text)">${e.name}</b> <span style="color:#64748b">(${e.code})</span><br>
+          <b style="color:var(--text)">${e.name}</b> <span style="color:#64748b">(${e.code})</span>${e.mobile?' <span style="color:#60a5fa">📱 '+e.mobile+'</span>':''}<br>
           <span style="color:#64748b">${e.designation||'—'} · ${e.machine||'—'} · ${e.resp||'—'}${e.salary?' · ₹'+e.salary:''}</span>
         </div>`).join('')}
     </div>
     <button class="submit-btn" style="margin-top:12px" onclick="confirmBulkImportTeam()">✅ ${_bulkImportParsed.length} कर्मचारी Import करें</button>`;
 }
 
+// ════════════════════════════════════════
+// DELETE ALL MEMBERS (OTP-verified, destructive)
+// ════════════════════════════════════════
+let _deleteFlowConfirmResult=null;
+let _deleteFlowRecaptcha=null;
+
+async function startDeleteAllMembersFlow(){
+  const myTeam=getEmps();
+  if(!myTeam.length){ toast('⚠️ आपकी Team पहले से खाली है'); return; }
+  const ok=await confirmModal(
+    '🗑️ सभी Team Members Delete करें?',
+    `आपकी Team के <b>${myTeam.length} Members</b> हमेशा के लिए Delete हो जाएंगे। यह Undo नहीं हो सकता।<br><br>Confirm करने के लिए आपके registered mobile पर OTP भेजा जाएगा।`,
+    '📱 OTP भेजें','रद्द करें'
+  );
+  if(!ok) return;
+  await _sendDeleteFlowOTP();
+}
+
+async function _sendDeleteFlowOTP(){
+  if(!SESSION.mobile){ toast('❌ Mobile number नहीं मिला'); return; }
+  try{
+    toast('OTP भेजा जा रहा है...');
+    if(!_deleteFlowRecaptcha){
+      _deleteFlowRecaptcha=new window._fbRecaptchaVerifierClass(window._fbAuth,'recaptcha-container',{size:'invisible'});
+    }
+    _deleteFlowConfirmResult=await window._fbSignInWithPhoneNumber(window._fbAuth,SESSION.mobile,_deleteFlowRecaptcha);
+    openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">📱 OTP डालें</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">${SESSION.mobile} पर OTP भेजा गया</div>
+    <div class="field">
+      <input type="text" id="deleteFlowOtpInput" inputmode="numeric" maxlength="6" placeholder="6 अंकों का OTP" style="width:100%;text-align:center;font-size:20px;letter-spacing:6px">
+    </div>
+    <div id="deleteFlowOtpErr" style="color:var(--lv);font-size:12px;margin-top:6px"></div>
+    <button class="submit-btn" style="margin-top:14px;background:#f43f5e" onclick="_verifyDeleteFlowOTP()">🗑️ Verify करके Delete करें</button>
+    <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
+    document.getElementById('deleteFlowOtpInput')?.focus();
+    toast('✅ OTP भेज दिया!');
+  }catch(err){
+    console.error('Delete flow OTP error:',err);
+    _deleteFlowRecaptcha=null;
+    toast('❌ OTP नहीं भेजा: '+(err.message||err.code));
+  }
+}
+
+async function _verifyDeleteFlowOTP(){
+  const otp=(document.getElementById('deleteFlowOtpInput')?.value||'').trim();
+  const errEl=document.getElementById('deleteFlowOtpErr');
+  if(otp.length!==6){ if(errEl) errEl.textContent='⚠️ 6 अंकों का OTP डालें'; return; }
+  if(!_deleteFlowConfirmResult){ if(errEl) errEl.textContent='❌ फिर से कोशिश करें'; return; }
+  try{
+    await _deleteFlowConfirmResult.confirm(otp);
+    // OTP verified — proceed with deletion
+    const myTeam=getEmps();
+    let deleted=0;
+    for(const emp of myTeam){
+      try{ await fbRemove('employees/'+emp.id); deleted++; }catch(e){}
+    }
+    closeModal();
+    toast(`🗑️ ${deleted} Team Members delete हो गए`);
+    _deleteFlowConfirmResult=null;
+    renderTeam();
+    refreshAll();
+  }catch(err){
+    console.error('Delete flow verify error:',err);
+    if(errEl) errEl.textContent='❌ गलत OTP — फिर कोशिश करें';
+  }
+}
+
+
+function openChangeCompanyModal(){
+  closeModal();
+  openModal(`<div class="modal-handle"></div>
+  <div class="modal-title">🏢 Company Name बदलें</div>
+  <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">वर्तमान Company: <b style="color:var(--text)">${SESSION.company||'—'}</b></div>
+  <div class="field">
+    <label>नई Company का नाम</label>
+    <input type="text" id="newCompanyNameInput" placeholder="जैसे: ABC Industries" style="width:100%">
+  </div>
+  <button class="submit-btn" style="margin-top:12px" onclick="_confirmChangeCompany()">आगे बढ़ें</button>
+  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
+}
+
+async function _confirmChangeCompany(){
+  const newName=(document.getElementById('newCompanyNameInput')?.value||'').trim();
+  if(!newName){ toast('⚠️ Company का नाम लिखें'); return; }
+  if(newName===SESSION.company){ toast('⚠️ यह तो वर्तमान नाम ही है'); return; }
+
+  const myKey=_normMobileKey(SESSION.mobile);
+  const myTeam=getEmps(); // employees where managerId === myKey (own team)
+  const teamCount=myTeam.length;
+
+  closeModal();
+  if(teamCount>0){
+    const wantDelete=await confirmModal(
+      '⚠️ अपनी पुरानी Team का क्या करें?',
+      `आपकी वर्तमान Company (<b>${SESSION.company}</b>) में <b>${teamCount} Team Members</b> हैं।<br><br>
+       क्या आप Company का नाम बदलते समय इन सभी को <b style="color:#f43f5e">DELETE</b> करना चाहते हैं, या इन्हें नई Company के नाम पर <b style="color:#22c55e">रखना</b> चाहते हैं?`,
+      '🗑️ हाँ, सभी Delete करें','✅ नहीं, Team रखें (सिर्फ नाम बदलें)'
+    );
+    await _applyCompanyChange(newName, wantDelete, myKey);
+  }else{
+    await _applyCompanyChange(newName, false, myKey);
+  }
+}
+
+async function _applyCompanyChange(newName, deleteTeam, myKey){
+  try{
+    if(deleteTeam){
+      const myTeam=getEmps();
+      for(const emp of myTeam){
+        await fbRemove('employees/'+emp.id);
+      }
+      toast('🗑️ पुरानी Team delete हो गई...');
+    }else{
+      const myTeam=getEmps();
+      for(const emp of myTeam){
+        await fbUpdate('employees/'+emp.id,{companyId:_normCompanyId(newName),companyLabel:newName});
+      }
+    }
+    // Update own mobileUsers record
+    const mobileKey=_normMobileKey(SESSION.mobile);
+    await fbUpdate('mobileUsers/'+mobileKey,{company:newName});
+    // Update SESSION
+    SESSION.company=newName;
+    SESSION.companyId=_normCompanyId(newName);
+    saveSession();
+    toast('✅ Company Name बदल गया: '+newName);
+    refreshAll();
+  }catch(e){ toast('❌ Error: '+e.message); }
+}
+
+
 async function confirmBulkImportTeam(){
   if(!_bulkImportParsed.length) return;
   const cid=myCompanyId()==='ALL'?'gls':myCompanyId();
   const label=SESSION.company||'GLS';
   const mgrId=(SESSION.role==='manager' && SESSION.mobile)?_normMobileKey(SESSION.mobile):'';
-  let saved=0, failed=0;
+  let saved=0, failed=0, registered=0;
   for(const [i,e] of _bulkImportParsed.entries()){
     try{
       const id='e'+Date.now().toString(36)+i;
       const rec={
         id, name:e.name, empId:e.code,
-        sec:e.designation||'STAFF', designation:e.designation||'',
+        sec:(e.machine||'STAFF').toString().trim().toUpperCase(), designation:e.designation||'',
         mc:e.machine||'—', resp:e.resp||'',
         monthlySalary:e.salary?Number(e.salary)||0:0,
         woff:'SUN', status:'active',
@@ -11759,13 +11907,31 @@ async function confirmBulkImportTeam(){
         ms:Array(31).fill('D')
       };
       if(mgrId) rec.managerId=mgrId;
+      if(e.mobile) rec.phone=e.mobile;
       await fbSet('employees/'+id,rec);
       saved++;
+
+      // Pre-approve login for this Member if a mobile number was given —
+      // they'll be auto-logged-in on their next OTP verification, no registration form needed.
+      if(e.mobile){
+        try{
+          const existing=await fbGet('mobileUsers/'+e.mobile);
+          if(!existing){
+            await fbSet('mobileUsers/'+e.mobile,{
+              role:'member', name:e.name, mobile:'+91'+e.mobile, company:label,
+              status:'approved', empCode:e.code, managerId:mgrId||'',
+              registeredAt:new Date().toISOString(),
+              approvedAt:new Date().toISOString(), approvedBy:SESSION.name+' (Excel Import)'
+            });
+            registered++;
+          }
+        }catch(ex){ console.warn('mobileUsers pre-approve skipped for',e.mobile,ex); }
+      }
     }catch(err){ failed++; console.error('Bulk import error:',e.name,err); }
   }
   _bulkImportParsed=[];
   closeModal();
-  toast(`✅ ${saved} कर्मचारी Team में जुड़ गए!${failed?' '+failed+' fail हुए.':''}`);
+  toast(`✅ ${saved} कर्मचारी Team में जुड़ गए!${registered?' '+registered+' का Login भी ready है।':''}${failed?' '+failed+' fail हुए.':''}`);
   renderTeam();
   refreshAll();
 }
