@@ -4404,33 +4404,45 @@ function getSchedFilteredEmps(){
   if(schedSec==='S12') return all.filter(e=>e.sec==='S1'||e.sec==='S2'); // legacy GLS grouped chip
   if(schedSec==='GRP:metalliser'){
     const cfg=getShiftConfigSync();
-    return all.filter(e=>(cfg.metallisers||[]).includes(e.sec));
+    const metKeys=new Set((cfg.metallisers||[]).map(_normSecKey));
+    return all.filter(e=>metKeys.has(_normSecKey(e.sec)));
   }
   if(schedSec==='GRP:slitter'){
     const cfg=getShiftConfigSync();
-    return all.filter(e=>(cfg.slitters||[]).includes(e.sec));
+    const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
+    return all.filter(e=>slitKeys.has(_normSecKey(e.sec)));
   }
   return all.filter(e=>e.sec===schedSec);
 }
 
+function _normSecKey(s){ return (s||'').toString().toUpperCase().replace(/[^A-Z0-9]/g,''); }
 function _buildMachineChips(kind){
   const cfg=getShiftConfigSync();
   const emps=getEmps();
   const chips=[{code:'ALL',label:_lang==='en'?'All':'सभी'}];
-  const mets=cfg.metallisers||[];
-  const slits=cfg.slitters||[];
-  const hasSec=(code)=>emps.some(e=>e.sec===code);
+  const metKeys=new Set((cfg.metallisers||[]).map(_normSecKey));
+  const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
+  const allSecs=Array.from(new Set(emps.map(e=>e.sec).filter(Boolean)));
+
+  const metSecs=allSecs.filter(s=>metKeys.has(_normSecKey(s)));
+  const slitSecs=allSecs.filter(s=>slitKeys.has(_normSecKey(s)));
+  const supSecs=allSecs.filter(s=>_normSecKey(s)==='SUP');
+  const mgrSecs=allSecs.filter(s=>_normSecKey(s)==='MGR');
+  const otherSecs=allSecs.filter(s=>!metKeys.has(_normSecKey(s))&&!slitKeys.has(_normSecKey(s))&&_normSecKey(s)!=='SUP'&&_normSecKey(s)!=='MGR');
+
   if(kind==='sched'){
-    if(mets.length>1 && mets.some(hasSec)) chips.push({code:'GRP:metalliser',label:_lang==='en'?'Metalliser (All)':'मेटलाइज़र (सभी)'});
-    else if(mets.length===1 && hasSec(mets[0])) chips.push({code:mets[0],label:secName(mets[0])||mets[0]});
-    if(slits.length>1 && slits.some(hasSec)) chips.push({code:'GRP:slitter',label:_lang==='en'?'Slitter (All)':'स्लिटर (सभी)'});
-    else if(slits.length===1 && hasSec(slits[0])) chips.push({code:slits[0],label:secName(slits[0])||slits[0]});
+    if(metSecs.length>1) chips.push({code:'GRP:metalliser',label:_lang==='en'?'Metalliser (All)':'मेटलाइज़र (सभी)'});
+    else if(metSecs.length===1) chips.push({code:metSecs[0],label:secName(metSecs[0])||metSecs[0]});
+    if(slitSecs.length>1) chips.push({code:'GRP:slitter',label:_lang==='en'?'Slitter (All)':'स्लिटर (सभी)'});
+    else if(slitSecs.length===1) chips.push({code:slitSecs[0],label:secName(slitSecs[0])||slitSecs[0]});
+    otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
   } else {
-    mets.forEach(m=>{ if(hasSec(m)) chips.push({code:m,label:secName(m)||m}); });
-    slits.forEach(s=>{ if(hasSec(s)) chips.push({code:s,label:secName(s)||s}); });
+    metSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+    slitSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+    otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
   }
-  if(hasSec('SUP')) chips.push({code:'SUP',label:'Supervisor'});
-  if(hasSec('MGR')) chips.push({code:'MGR',label:'Manager'});
+  if(supSecs.length) chips.push({code:'SUP',label:secName('SUP')||'Supervisor'});
+  if(mgrSecs.length) chips.push({code:'MGR',label:secName('MGR')||'Manager'});
   return chips;
 }
 function _renderDynamicChips(containerId, chips, activeCode, clickFnName){
@@ -6391,7 +6403,12 @@ async function launchApp(){
   try{ syncStickyTop(); }catch(e){}
 
   const ini=(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2);
-  document.getElementById('userAv').textContent=ini;
+  const userAvEl=document.getElementById('userAv');
+  if(SESSION.photoUrl){
+    userAvEl.innerHTML=`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+  }else{
+    userAvEl.textContent=ini;
+  }
   document.getElementById('userHdrName').textContent=(SESSION.name||'Guest').split(' ')[0];
 
   const rt=document.getElementById('roleTag');
@@ -6816,10 +6833,15 @@ async function showProfile(){
     const roleLabel = isMgr()?'🏅 Manager':isSupervisor()?'👁️ Supervisor':'👤 User';
     openModal(`<div class="modal-handle"></div>
     <div style="text-align:center;padding:10px 0">
-      <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px;font-weight:900;color:#fff;font-family:'Barlow Condensed',sans-serif">${(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}</div>
+      <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px;font-weight:900;color:#fff;font-family:'Barlow Condensed',sans-serif;overflow:hidden">${SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}</div>
       <div style="font-size:20px;font-weight:900;color:#fff">${SESSION.name}</div>
       <div style="font-size:12px;color:var(--muted2);margin-top:4px">${SESSION.empId||'—'} · ${secLabel}</div>
       <div style="margin-top:6px"><span style="background:rgba(249,115,22,.15);color:#f97316;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:800">${roleLabel}</span></div>
+      ${(SESSION.role==='manager'||SESSION.role==='member')?`<button class="profile-action" style="margin-top:14px" onclick="openEditProfileModal()">
+        <div class="pa-icon" style="background:rgba(96,165,250,.12)">✏️</div>
+        <div><div class="pa-label">Profile Edit करें</div><div class="pa-sub">नाम और फोटो बदलें</div></div>
+        <div class="pa-arrow">›</div>
+      </button>`:''}
 
       <div style="background:var(--panel);border:1.5px solid ${daysLeft<=7?color:'var(--border2)'};border-radius:14px;padding:16px;margin:16px 0;text-align:left">
         <div style="font-size:11px;color:var(--muted2);font-weight:700;letter-spacing:1px;margin-bottom:6px">APP ACCESS VALIDITY</div>
@@ -11822,6 +11844,77 @@ async function _verifyDeleteFlowOTP(){
     console.error('Delete flow verify error:',err);
     if(errEl) errEl.textContent='❌ गलत OTP — फिर कोशिश करें';
   }
+}
+
+
+// ════════════════════════════════════════
+// EDIT PROFILE — Name & Photo (self-registered Manager/Member)
+// ════════════════════════════════════════
+let _editProfilePhotoData=null;
+
+function openEditProfileModal(){
+  _editProfilePhotoData=SESSION.photoUrl||null;
+  closeModal();
+  openModal(`<div class="modal-handle"></div>
+  <div class="modal-title">✏️ Profile Edit करें</div>
+  <div style="text-align:center;margin-bottom:16px">
+    <div id="editProfilePhotoPreview" style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:32px;font-weight:900;color:#fff;overflow:hidden">${SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}</div>
+    <input type="file" id="editProfilePhotoInput" accept="image/*" style="display:none" onchange="_handleProfilePhotoSelect(this.files[0])">
+    <button class="cancel-btn" onclick="document.getElementById('editProfilePhotoInput').click()">📷 फोटो चुनें</button>
+  </div>
+  <div class="field">
+    <label>नाम</label>
+    <input type="text" id="editProfileNameInput" value="${(SESSION.name||'').replace(/"/g,'&quot;')}" style="width:100%">
+  </div>
+  <button class="submit-btn" style="margin-top:14px" onclick="_saveEditProfile()">✅ Save करें</button>
+  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
+}
+
+function _handleProfilePhotoSelect(file){
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('⚠️ केवल Image file चुनें'); return; }
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const maxSize=200;
+      let w=img.width, h=img.height;
+      if(w>h){ if(w>maxSize){ h=Math.round(h*maxSize/w); w=maxSize; } }
+      else{ if(h>maxSize){ w=Math.round(w*maxSize/h); h=maxSize; } }
+      const canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL('image/jpeg',0.75);
+      _editProfilePhotoData=dataUrl;
+      const preview=document.getElementById('editProfilePhotoPreview');
+      if(preview) preview.innerHTML=`<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _saveEditProfile(){
+  const newName=(document.getElementById('editProfileNameInput')?.value||'').trim();
+  if(!newName){ toast('⚠️ नाम खाली नहीं हो सकता'); return; }
+  try{
+    const mobileKey=_normMobileKey(SESSION.mobile);
+    const updates={name:newName};
+    if(_editProfilePhotoData) updates.photoUrl=_editProfilePhotoData;
+    await fbUpdate('mobileUsers/'+mobileKey,updates);
+    SESSION.name=newName;
+    if(_editProfilePhotoData) SESSION.photoUrl=_editProfilePhotoData;
+    saveSession();
+    closeModal();
+    toast('✅ Profile update हो गई');
+    const ini=(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2);
+    const userAvEl=document.getElementById('userAv');
+    if(userAvEl){
+      userAvEl.innerHTML = SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:ini;
+    }
+    const nameEl=document.getElementById('userHdrName');
+    if(nameEl) nameEl.textContent=(SESSION.name||'Guest').split(' ')[0];
+  }catch(e){ toast('❌ Error: '+e.message); }
 }
 
 
