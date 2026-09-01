@@ -2467,7 +2467,6 @@ setTimeout(_forceLogin, 10000);
     <button id="schedBuildBtn" onclick="openScheduleBuilder()" class="sched-admin-btn green">📋 Schedule बनाएं</button>
     <button id="printBtn" onclick="printSched()" class="sched-admin-btn">🖨️ प्रिंट</button>
     <button id="excelBtn" onclick="exportSchedExcel()" class="sched-admin-btn" style="border-color:rgba(34,197,94,.5);color:#22c55e;background:rgba(34,197,94,.07)">📊 Excel</button>
-    <button id="empUploadWizardBtn" onclick="openEmpUploadWizard()" class="sched-admin-btn" style="border-color:rgba(34,197,94,.4);color:var(--green);background:rgba(34,197,94,.06)">👤 Emp Upload</button>
     <button id="msToggleBtn" onclick="toggleSelectMode()" class="sched-admin-btn" style="border-color:rgba(167,139,250,.4);color:#a78bfa;background:rgba(167,139,250,.06)">☑️ Multi-Select</button>
     <button id="empReorderBtn" onclick="openEmpReorderPanel()" class="sched-admin-btn" style="border-color:rgba(168,85,247,.4);color:#c084fc;background:rgba(168,85,247,.08)">↕️ क्रम बदलें</button>
   </div>
@@ -6835,7 +6834,7 @@ async function showProfile(){
     <div style="text-align:center;padding:10px 0">
       <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px;font-weight:900;color:#fff;font-family:'Barlow Condensed',sans-serif;overflow:hidden">${SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}</div>
       <div style="font-size:20px;font-weight:900;color:#fff">${SESSION.name}</div>
-      <div style="font-size:12px;color:var(--muted2);margin-top:4px">${SESSION.empId||'—'} · ${secLabel}</div>
+      <div style="font-size:12px;color:var(--muted2);margin-top:4px">${(SESSION.role==='manager'||SESSION.role==='member')?('📱 '+(SESSION.mobile||'—')):(SESSION.empId||'—')+' · '+secLabel}</div>
       <div style="margin-top:6px"><span style="background:rgba(249,115,22,.15);color:#f97316;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:800">${roleLabel}</span></div>
       ${(SESSION.role==='manager'||SESSION.role==='member')?`<button class="profile-action" style="margin-top:14px" onclick="openEditProfileModal()">
         <div class="pa-icon" style="background:rgba(96,165,250,.12)">✏️</div>
@@ -10406,7 +10405,11 @@ function renderAdminTeamHierarchy(){
   block.style.display='block';
   fbGet('mobileUsers').then(data=>{
     if(!data){ el.innerHTML='<div class="empty-text" style="font-size:12px;padding:12px">कोई registered Manager नहीं</div>'; return; }
-    const all=Object.entries(data);
+    let all=Object.entries(data);
+    const viewCid=SESSION.viewCompanyId;
+    if(viewCid && viewCid!=='ALL'){
+      all=all.filter(([k,v])=>_normCompanyId(v.company)===viewCid);
+    }
     const managers=all.filter(([k,v])=>v.role==='manager'&&v.status!=='rejected');
     const managerKeys=new Set(managers.map(([k])=>k));
     const uncategorised=all.filter(([k,v])=>v.role==='member'&&v.status!=='rejected'&&(!v.managerId||!managerKeys.has(v.managerId)));
@@ -10814,7 +10817,7 @@ function renderTeam(search=''){
           </div>
           ${(isAdmin() || (isMgr() && e.sec!=='MGR'))?`<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
             <button class="act-btn edit" style="padding:7px 10px;font-size:11px" onclick="openEditEmpForm('${e.id}')">✏️</button>
-            ${isAdmin()?`<button class="act-btn del"  style="padding:7px 10px;font-size:11px" onclick="confirmDelEmp('${e.id}','${e.name}')">🗑️</button>`:''}
+            ${isAdminOrMgr()?`<button class="act-btn del"  style="padding:7px 10px;font-size:11px" onclick="confirmDelEmp('${e.id}','${e.name}')">🗑️</button>`:''}
             <button style="padding:7px 10px;font-size:11px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);border-radius:7px;color:#38bdf8;cursor:pointer" onclick="openDeviceManager('${e.id}','${e.name}')">📱</button>
           </div>`:''}
         </div>
@@ -11672,7 +11675,9 @@ function openBulkImportTeam(){
     <b style="color:var(--text)">Name</b> (जरूरी) · <b style="color:var(--text)">E Code</b> (जरूरी) ·
     <b style="color:var(--text)">Designation</b> · <b style="color:var(--text)">Machine</b> ·
     <b style="color:var(--text)">Responsibility</b> · <b style="color:var(--text)">Salary</b> (वैकल्पिक) ·
-    <b style="color:var(--text)">Mobile Number</b> (वैकल्पिक — दिया तो वो OTP से सीधे Login कर पाएंगे)
+    <b style="color:var(--text)">Mobile Number</b> (वैकल्पिक — दिया तो वो OTP से सीधे Login कर पाएंगे) ·
+    <b style="color:var(--text)">Joining Date</b> (वैकल्पिक) · <b style="color:var(--text)">Weekly Off</b> (वैकल्पिक) ·
+    <b style="color:var(--text)">Date of Birth</b> (वैकल्पिक)
   </div>
   <button class="cancel-btn" style="margin-bottom:12px" onclick="downloadBulkImportTemplate()">⬇️ Sample Template Download करें</button>
   <input type="file" id="bulkImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleBulkImportFile(this.files[0])">
@@ -11682,7 +11687,7 @@ function openBulkImportTeam(){
 }
 
 function downloadBulkImportTemplate(){
-  const csv='Name,E Code,Designation,Machine,Responsibility,Salary,Mobile Number\nRAM KUMAR,30001001,Operator,M-1,Operation,25000,9876543210\nSHYAM LAL,30001002,Supervisor,ALL,Quality Check,,\n';
+  const csv='Name,E Code,Designation,Machine,Responsibility,Salary,Mobile Number,Joining Date,Weekly Off,Date of Birth\nRAM KUMAR,30001001,Operator,M-1,Operation,25000,9876543210,01-04-2024,Sunday,15-06-1995\nSHYAM LAL,30001002,Supervisor,ALL,Quality Check,,,,Monday,\n';
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
@@ -11697,7 +11702,7 @@ function handleBulkImportFile(file){
   previewEl.innerHTML='<div class="empty-text" style="padding:12px">Reading file...</div>';
 
   const parseWorkbook=(data)=>{
-    const wb=XLSX.read(data,{type:'array'});
+    const wb=XLSX.read(data,{type:'array',cellDates:true});
     const sheet=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
     _processBulkImportRows(rows);
@@ -11731,6 +11736,21 @@ function _findCol(row,names){
   return '';
 }
 
+function _parseImportDate(val){
+  if(!val) return '';
+  if(val instanceof Date && !isNaN(val)) return val.toISOString().split('T')[0];
+  const s=val.toString().trim();
+  if(!s) return '';
+  const parsed=new Date(s);
+  if(!isNaN(parsed)) return parsed.toISOString().split('T')[0];
+  return s; // keep as-is if unparseable, don't block the row
+}
+const _WOFF_MAP={SUN:'SUN',SUNDAY:'SUN',MON:'MON',MONDAY:'MON',TUE:'TUE',TUESDAY:'TUE',WED:'WED',WEDNESDAY:'WED',THU:'THU',THURSDAY:'THU',FRI:'FRI',FRIDAY:'FRI',SAT:'SAT',SATURDAY:'SAT'};
+function _parseImportWoff(val){
+  const s=(val||'').toString().trim().toUpperCase();
+  return _WOFF_MAP[s]||'SUN';
+}
+
 function _processBulkImportRows(rows){
   const previewEl=document.getElementById('bulkImportPreview');
   const existingCodes=new Set(getEmps().map(e=>(e.empId||'').toString().trim()));
@@ -11748,11 +11768,14 @@ function _processBulkImportRows(rows){
     let mobile=(_findCol(row,['mobile','mobile number','phone','phone number','contact'])||'').toString().trim().replace(/[^0-9]/g,'');
     if(mobile.length===12 && mobile.startsWith('91')) mobile=mobile.slice(2); // strip country code if present
     if(mobile.length!==10) mobile=''; // ignore invalid mobile, don't block the row
+    const joiningDate=_parseImportDate(_findCol(row,['joining date','joining','date of joining','doj']));
+    const dob=_parseImportDate(_findCol(row,['date of birth','dob','birth date','birthday']));
+    const woff=_parseImportWoff(_findCol(row,['weekly off','week off','weekly holiday','woff']));
 
     if(!name || !code){ invalidCount++; return; }
     if(existingCodes.has(code) || seenInFile.has(code)){ dupCount++; return; }
     seenInFile.add(code);
-    _bulkImportParsed.push({name,code,designation,machine,resp,salary,mobile});
+    _bulkImportParsed.push({name,code,designation,machine,resp,salary,mobile,joiningDate,dob,woff});
   });
 
   if(!_bulkImportParsed.length){
@@ -11772,10 +11795,11 @@ function _processBulkImportRows(rows){
       ${_bulkImportParsed.map(e=>`
         <div style="padding:8px 10px;border-bottom:1px solid var(--border2);font-size:12px">
           <b style="color:var(--text)">${e.name}</b> <span style="color:#64748b">(${e.code})</span>${e.mobile?' <span style="color:#60a5fa">📱 '+e.mobile+'</span>':''}<br>
-          <span style="color:#64748b">${e.designation||'—'} · ${e.machine||'—'} · ${e.resp||'—'}${e.salary?' · ₹'+e.salary:''}</span>
+          <span style="color:#64748b">${e.designation||'—'} · ${e.machine||'—'} · ${e.resp||'—'}${e.salary?' · ₹'+e.salary:''}</span><br>
+          <span style="color:#64748b;font-size:11px">Weekly Off: ${e.woff}${e.joiningDate?' · Joined: '+e.joiningDate:''}${e.dob?' · DOB: '+e.dob:''}</span>
         </div>`).join('')}
     </div>
-    <button class="submit-btn" style="margin-top:12px" onclick="confirmBulkImportTeam()">✅ ${_bulkImportParsed.length} कर्मचारी Import करें</button>`;
+    <button id="bulkImportSubmitBtn" class="submit-btn" style="margin-top:12px" onclick="confirmBulkImportTeam()">✅ ${_bulkImportParsed.length} कर्मचारी Import करें</button>`;
 }
 
 // ════════════════════════════════════════
@@ -11981,8 +12005,13 @@ async function _applyCompanyChange(newName, deleteTeam, myKey){
 }
 
 
+let _bulkImportInProgress=false;
 async function confirmBulkImportTeam(){
+  if(_bulkImportInProgress) return; // prevent duplicate submissions from rapid/multiple clicks
   if(!_bulkImportParsed.length) return;
+  _bulkImportInProgress=true;
+  const btn=document.getElementById('bulkImportSubmitBtn');
+  if(btn){ btn.disabled=true; btn.style.opacity='0.5'; btn.textContent='⏳ Import हो रहा है...'; }
   const cid=myCompanyId()==='ALL'?'gls':myCompanyId();
   const label=SESSION.company||'GLS';
   const mgrId=(SESSION.role==='manager' && SESSION.mobile)?_normMobileKey(SESSION.mobile):'';
@@ -11995,10 +12024,12 @@ async function confirmBulkImportTeam(){
         sec:(e.machine||'STAFF').toString().trim().toUpperCase(), designation:e.designation||'',
         mc:e.machine||'—', resp:e.resp||'',
         monthlySalary:e.salary?Number(e.salary)||0:0,
-        woff:'SUN', status:'active',
+        woff:e.woff||'SUN', status:'active',
         companyId:cid, companyLabel:label,
         ms:Array(31).fill('D')
       };
+      if(e.joiningDate) rec.joiningDate=e.joiningDate;
+      if(e.dob) rec.dob=e.dob;
       if(mgrId) rec.managerId=mgrId;
       if(e.mobile) rec.phone=e.mobile;
       await fbSet('employees/'+id,rec);
@@ -12023,6 +12054,7 @@ async function confirmBulkImportTeam(){
     }catch(err){ failed++; console.error('Bulk import error:',e.name,err); }
   }
   _bulkImportParsed=[];
+  _bulkImportInProgress=false;
   closeModal();
   toast(`✅ ${saved} कर्मचारी Team में जुड़ गए!${registered?' '+registered+' का Login भी ready है।':''}${failed?' '+failed+' fail हुए.':''}`);
   renderTeam();
@@ -12124,6 +12156,7 @@ function openEditEmpForm(empId){
     </select>
   </div>
   <button class="submit-btn" onclick="saveEmployee('${empId}')">💾 सेव करें</button>
+  ${isAdminOrMgr()?`<button class="cancel-btn" style="margin-top:8px;color:#f43f5e;border-color:rgba(244,63,94,.3)" onclick="closeModal();confirmDelEmp('${empId}','${e.name.replace(/'/g,"\\'")}')">🗑️ Team से हटाएं</button>`:''}
   <button class="cancel-btn" onclick="closeModal()">रद्द करें</button>`);
 }
 
