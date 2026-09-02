@@ -14503,6 +14503,7 @@ const WOFF_DOW = {SUN:0,MON:1,TUE:2,WED:3,THU:4,FRI:5,SAT:6};
 
 async function loadScheduleBuilder(){
   try{
+  _sbSelStart=null; _sbSelEnd=null; _sbSelectedCells=[]; _sbSelecting=false;
   const monthKey = document.getElementById('sb_month').value;
   const secFilter = document.getElementById('sb_sec').value;
   if(!monthKey){toast('⚠️ महीना चुनें');return;}
@@ -14556,7 +14557,7 @@ async function loadScheduleBuilder(){
     return `<th style="min-width:32px;font-size:10px;padding:3px 2px;background:#1e293b;color:${dt.getDay()===0?'#f87171':'#94a3b8'}">${d}<br><span style="font-size:9px">${dow}</span></th>`;
   }).join('');
 
-  const rows = emps.map(emp => {
+  const rows = emps.map((emp,rowIdx) => {
     if(!emp || !emp.id) return '';
     // Ensure empSaved is always an array (Firebase converts arrays to objects)
     let empSaved = saved[emp.id];
@@ -14596,13 +14597,10 @@ async function loadScheduleBuilder(){
       const cls = val ? cellClass(val) : '';
       const isWoffDay = empWoffDow !== -1 && new Date(yr, mo-1, d).getDay() === empWoffDow;
       const leaveStyle = isLeaveDate ? 'outline:2px solid #f43f5e;border-radius:4px;box-shadow:0 0 4px rgba(244,63,94,.5);' : '';
-      const cellClick = isLeaveDate
-        ? `_confirmLeaveOverride(this,'${emp.id}',${i},'${dateStr}')`
-        : `cycleSBCell(this,'${emp.id}',${i},'${monthKey}')`;
+      const leaveClick = isLeaveDate ? ` onclick="_confirmLeaveOverride(this,'${emp.id}',${i},'${dateStr}')"` : '';
       return `<td style="padding:2px;${isWoffDay?'background:rgba(249,115,22,0.06);':''}" title="${isLeaveDate?'🛡️ Approved Leave':isWoffDay?emp.woff+' (Weekly Off)':''}">
-        <div class="shc ${cls}" style="width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset;${leaveStyle}${isWoffDay&&!val&&!isLeaveDate?'border:1px dashed rgba(249,115,22,0.3);':''}"
-          onclick="${cellClick}"
-          data-empid="${emp.id}" data-day="${i}" data-val="${val}">
+        <div class="shc ${cls}" style="width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset;touch-action:none;user-select:none;${leaveStyle}${isWoffDay&&!val&&!isLeaveDate?'border:1px dashed rgba(249,115,22,0.3);':''}"${leaveClick}
+          data-empid="${emp.id}" data-day="${i}" data-row="${rowIdx}" data-val="${val}" data-isleave="${isLeaveDate?'1':'0'}">
           ${val ? cellDisp(val) : '—'}
         </div>
       </td>`;
@@ -14626,7 +14624,7 @@ async function loadScheduleBuilder(){
       <button onclick="openScheduleBuilder()" style="background:none;border:1px solid var(--border2);border-radius:8px;color:var(--muted);padding:5px 10px;cursor:pointer;font-size:12px">← बदलें</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
-      <div id="sbCellLegend" style="font-size:11px;color:var(--muted2);flex:1">Cell tap करें: D → N → O → L → G → CO → ½ → Ab → साफ</div>
+      <div id="sbCellLegend" style="font-size:11px;color:var(--muted2);flex:1">🖱️ Drag करके Cells चुनें · Double-tap करके Copy/Select करें</div>
       <button onclick="autoGenSchedule('${monthKey}')"
         style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;border-radius:10px;
         color:#fff;font-size:12px;font-weight:800;padding:8px 14px;cursor:pointer;white-space:nowrap;
@@ -14634,6 +14632,7 @@ async function loadScheduleBuilder(){
         🤖 Auto बनाएं
       </button>
     </div>
+    <div id="sbToolbar" style="display:none"></div>
     <div style="overflow-x:auto;margin-bottom:14px;border-radius:8px;border:1px solid var(--border2)">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>
@@ -14647,6 +14646,7 @@ async function loadScheduleBuilder(){
       <button class="submit-btn" style="flex:1" onclick="saveScheduleBuilder('${monthKey}')">💾 Save करें</button>
       <button class="cancel-btn" style="flex:1" onclick="closeModal()">रद्द करें</button>
     </div>`);
+  setTimeout(initSBSelection, 50);
   }catch(err){console.error('loadScheduleBuilder error:',err);toast('❌ Error: '+err.message);}
 }
 
@@ -14657,23 +14657,176 @@ function cycleSBCell(el, empId, dayIdx, monthKey){
   const order = ['D','N','O','L','G','C/O','H','OD','HLF','Ab',''];
   const cur = el.dataset.val || '';
   const next = order[(order.indexOf(cur)+1) % order.length];
-  
-  // Update visual
-  el.dataset.val = next;
-  el.className = 'shc ' + (next ? cellClass(next) : '');
-  el.style.cssText = 'width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset';
-  el.textContent = next ? cellDisp(next) : '—';
-  
-  // Store in memory
-  if(!_sbData[empId]) {
-    // Get current row values — scope to modal tbody only
-    const sbTbody = document.getElementById('sb_tbody');
-    const allCells = sbTbody
-      ? sbTbody.querySelectorAll(`[data-empid="${empId}"]`)
-      : document.querySelectorAll(`[data-empid="${empId}"]`);
-    _sbData[empId] = Array.from(allCells).map(c => c.dataset.val || '');
+  _sbSetCellValue(el, next);
+}
+
+// ════════════════════════════════════════════════════════════════
+// SCHEDULE BUILDER — Excel-like drag-select, copy, paste, quick-fill
+// ════════════════════════════════════════════════════════════════
+let _sbSelecting=false;
+let _sbSelStart=null;   // {row,day}
+let _sbSelEnd=null;     // {row,day}
+let _sbSelectedCells=[];
+let _sbClipboard=null;  // {grid:[[val,...],...], rows, cols}
+
+function _sbSetCellValue(cell, val){
+  const empId=cell.dataset.empid;
+  const dayIdx=+cell.dataset.day;
+  cell.dataset.val=val;
+  const selected=cell.classList.contains('sb-selected');
+  cell.className='shc '+(val?cellClass(val):'')+(selected?' sb-selected':'');
+  cell.textContent=val?cellDisp(val):'—';
+  if(!_sbData[empId]){
+    const sbTbody=document.getElementById('sb_tbody');
+    const allCells=sbTbody?sbTbody.querySelectorAll(`[data-empid="${empId}"]`):document.querySelectorAll(`[data-empid="${empId}"]`);
+    _sbData[empId]=Array.from(allCells).map(c=>c.dataset.val||'');
   }
-  _sbData[empId][dayIdx] = next;
+  _sbData[empId][dayIdx]=val;
+}
+
+function initSBSelection(){
+  const tbody=document.getElementById('sb_tbody');
+  if(!tbody) return;
+  // Inject selection highlight style once
+  if(!document.getElementById('sbSelectionStyle')){
+    const style=document.createElement('style');
+    style.id='sbSelectionStyle';
+    style.textContent='.sb-selected{outline:2px solid #3b82f6 !important;box-shadow:0 0 0 2px rgba(59,130,246,.3) !important;position:relative;z-index:2;}';
+    document.head.appendChild(style);
+  }
+  tbody.querySelectorAll('.shc[data-isleave="0"]').forEach(cell=>{
+    cell.addEventListener('pointerdown', e=>{
+      e.preventDefault();
+      _sbSelecting=true;
+      _sbSelStart={row:+cell.dataset.row, day:+cell.dataset.day};
+      _sbSelEnd={row:+cell.dataset.row, day:+cell.dataset.day};
+      _sbUpdateSelectionVisual();
+    });
+    cell.addEventListener('dblclick', e=>{
+      e.preventDefault();
+      _sbHandleDoubleClick(cell);
+    });
+  });
+  tbody.addEventListener('pointermove', e=>{
+    if(!_sbSelecting) return;
+    const el=document.elementFromPoint(e.clientX, e.clientY);
+    const cellEl=el?.closest('.shc[data-isleave="0"]');
+    if(cellEl){
+      const r=+cellEl.dataset.row, d=+cellEl.dataset.day;
+      if(!_sbSelEnd || _sbSelEnd.row!==r || _sbSelEnd.day!==d){
+        _sbSelEnd={row:r, day:d};
+        _sbUpdateSelectionVisual();
+      }
+    }
+  });
+  document.addEventListener('pointerup', _sbFinishSelection);
+}
+
+function _sbFinishSelection(){
+  if(!_sbSelecting) return;
+  _sbSelecting=false;
+  _sbShowToolbar();
+}
+
+function _sbUpdateSelectionVisual(){
+  if(!_sbSelStart || !_sbSelEnd) return;
+  const r1=Math.min(_sbSelStart.row,_sbSelEnd.row), r2=Math.max(_sbSelStart.row,_sbSelEnd.row);
+  const d1=Math.min(_sbSelStart.day,_sbSelEnd.day), d2=Math.max(_sbSelStart.day,_sbSelEnd.day);
+  const tbody=document.getElementById('sb_tbody');
+  if(!tbody) return;
+  _sbSelectedCells=[];
+  tbody.querySelectorAll('.shc').forEach(cell=>{
+    const row=+cell.dataset.row, day=+cell.dataset.day;
+    if(row>=r1&&row<=r2&&day>=d1&&day<=d2){
+      cell.classList.add('sb-selected');
+      _sbSelectedCells.push(cell);
+    }else{
+      cell.classList.remove('sb-selected');
+    }
+  });
+}
+
+function _sbClearSelectionOnly(){
+  _sbSelStart=null; _sbSelEnd=null;
+  document.querySelectorAll('#sb_tbody .sb-selected').forEach(c=>c.classList.remove('sb-selected'));
+  _sbSelectedCells=[];
+  _sbShowToolbar();
+}
+
+function _sbShowToolbar(){
+  const bar=document.getElementById('sbToolbar');
+  if(!bar) return;
+  if(!_sbSelectedCells.length){ bar.innerHTML=''; bar.style.display='none'; return; }
+  const values=[
+    {v:'D',l:'D'},{v:'N',l:'N'},{v:'O',l:'O'},{v:'L',l:'L'},
+    {v:'G',l:'G'},{v:'C/O',l:'CO'},{v:'H',l:'H'},{v:'OD',l:'OD'},
+    {v:'HLF',l:'½'},{v:'Ab',l:'Ab'},{v:'',l:'✖ साफ'}
+  ];
+  bar.style.display='block';
+  bar.innerHTML=`
+    <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:10px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <span style="font-size:12px;font-weight:800;color:var(--text)">${_sbSelectedCells.length} Cell चुने गए</span>
+        <div style="display:flex;gap:6px">
+          <button onclick="_sbCopySelection()" style="background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">📋 Copy</button>
+          ${_sbClipboard?`<button onclick="_sbPasteSelection()" style="background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">📥 Paste (${_sbClipboard.rows}×${_sbClipboard.cols})</button>`:''}
+          <button onclick="_sbClearSelectionOnly()" style="background:none;color:#64748b;border:1px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:11px;cursor:pointer">✕</button>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:6px">यहाँ tap करके सीधे भरें:</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        ${values.map(o=>`<button onclick="_sbFillSelection('${o.v}')" style="min-width:34px;padding:6px 8px;border-radius:6px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:11px;font-weight:800;cursor:pointer">${o.l}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+function _sbFillSelection(val){
+  _sbSelectedCells.forEach(cell=>_sbSetCellValue(cell,val));
+  toast(val?`✅ ${_sbSelectedCells.length} cells में '${cellDisp(val)}' भरा गया`:'✅ Cells साफ हो गए');
+}
+
+function _sbCopySelection(){
+  if(!_sbSelStart || !_sbSelEnd || !_sbSelectedCells.length) return;
+  const r1=Math.min(_sbSelStart.row,_sbSelEnd.row), r2=Math.max(_sbSelStart.row,_sbSelEnd.row);
+  const d1=Math.min(_sbSelStart.day,_sbSelEnd.day), d2=Math.max(_sbSelStart.day,_sbSelEnd.day);
+  const grid=[];
+  for(let r=r1;r<=r2;r++){
+    const rowVals=[];
+    for(let d=d1;d<=d2;d++){
+      const cell=document.querySelector(`#sb_tbody .shc[data-row="${r}"][data-day="${d}"]`);
+      rowVals.push(cell?cell.dataset.val||'':'');
+    }
+    grid.push(rowVals);
+  }
+  _sbClipboard={grid, rows:r2-r1+1, cols:d2-d1+1};
+  toast(`📋 ${_sbClipboard.rows}×${_sbClipboard.cols} Cells Copy हुए`);
+  _sbShowToolbar();
+}
+
+function _sbPasteSelection(){
+  if(!_sbClipboard || !_sbSelStart || !_sbSelEnd) return;
+  const r1=Math.min(_sbSelStart.row,_sbSelEnd.row), r2=Math.max(_sbSelStart.row,_sbSelEnd.row);
+  const d1=Math.min(_sbSelStart.day,_sbSelEnd.day), d2=Math.max(_sbSelStart.day,_sbSelEnd.day);
+  for(let r=r1;r<=r2;r++){
+    for(let d=d1;d<=d2;d++){
+      const srcVal=_sbClipboard.grid[(r-r1)%_sbClipboard.rows][(d-d1)%_sbClipboard.cols];
+      const cell=document.querySelector(`#sb_tbody .shc[data-row="${r}"][data-day="${d}"][data-isleave="0"]`);
+      if(cell) _sbSetCellValue(cell, srcVal);
+    }
+  }
+  toast('✅ Paste हो गया');
+}
+
+function _sbHandleDoubleClick(cell){
+  const row=+cell.dataset.row, day=+cell.dataset.day;
+  _sbSelStart={row,day};
+  _sbSelEnd={row,day};
+  _sbUpdateSelectionVisual();
+  if(cell.dataset.val){
+    _sbCopySelection(); // has a value — copy it for quick reuse elsewhere
+  }else{
+    _sbShowToolbar(); // empty — show quick-value picker
+  }
 }
 
 
