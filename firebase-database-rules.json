@@ -1,0 +1,169 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "mobileUsers": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "adminNotifications": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "employees": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "leaves": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "reports": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "schedules": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "shiftConfigs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "todos": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "overrides": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "instructions": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "deviceApprovals": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "deviceChangeRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "userApprovals": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "userNotifications": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "loginRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "regRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "leftEmployees": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "resignations": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "workerPasswords": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "securityLog": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "adminAuth": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "subscriptions": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "metcostData": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "metcostSettings": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "smsSettings": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "settings": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "appVersion": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "aboutContent": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "learnContent": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "learnPrices": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "learnButtons": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "learnRequests": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "supskillAnalysis": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "supskillDowntime": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "supskillVideoLinks": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid == $uid || root.child('users/' + auth.uid + '/phone').val() == '+918929394920' || root.child('users/' + auth.uid + '/phone').val() == '8929394920')"
+      },
+      ".read": "auth != null"
+    },
+    "companies": {
+      "$companyId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "adminLogs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "attendance": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

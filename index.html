@@ -4401,15 +4401,8 @@ function getSchedFilteredEmps(){
   if(schedSec==='ALL') return all;
   if(schedSec==='M12') return all.filter(e=>e.sec==='M1'||e.sec==='M2'); // legacy GLS grouped chip
   if(schedSec==='S12') return all.filter(e=>e.sec==='S1'||e.sec==='S2'); // legacy GLS grouped chip
-  if(schedSec==='GRP:metalliser'){
-    const cfg=getShiftConfigSync();
-    const metKeys=new Set((cfg.metallisers||[]).map(_normSecKey));
-    return all.filter(e=>metKeys.has(_normSecKey(e.sec)));
-  }
-  if(schedSec==='GRP:slitter'){
-    const cfg=getShiftConfigSync();
-    const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
-    return all.filter(e=>slitKeys.has(_normSecKey(e.sec)));
+  if(schedSec==='GRP:supervisor'){
+    return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; });
   }
   return all.filter(e=>e.sec===schedSec);
 }
@@ -4423,24 +4416,21 @@ function _buildMachineChips(kind){
   const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
   const allSecs=Array.from(new Set(emps.map(e=>e.sec).filter(Boolean)));
 
-  const metSecs=allSecs.filter(s=>metKeys.has(_normSecKey(s)));
-  const slitSecs=allSecs.filter(s=>slitKeys.has(_normSecKey(s)));
-  const supSecs=allSecs.filter(s=>_normSecKey(s)==='SUP');
+  const metPoolSecs=allSecs.filter(s=>_normSecKey(s)==='MET');
+  const slitPoolSecs=allSecs.filter(s=>_normSecKey(s)==='SLIT');
+  const supSecs=allSecs.filter(s=>{ const k=_normSecKey(s); return k==='SUP'||k==='ALL'; });
   const mgrSecs=allSecs.filter(s=>_normSecKey(s)==='MGR');
-  const otherSecs=allSecs.filter(s=>!metKeys.has(_normSecKey(s))&&!slitKeys.has(_normSecKey(s))&&_normSecKey(s)!=='SUP'&&_normSecKey(s)!=='MGR');
+  const metMachineSecs=allSecs.filter(s=>metKeys.has(_normSecKey(s)) && _normSecKey(s)!=='MET');
+  const slitMachineSecs=allSecs.filter(s=>slitKeys.has(_normSecKey(s)) && _normSecKey(s)!=='SLIT');
+  const known=new Set([...metPoolSecs,...slitPoolSecs,...supSecs,...mgrSecs,...metMachineSecs,...slitMachineSecs]);
+  const otherSecs=allSecs.filter(s=>!known.has(s));
 
-  if(kind==='sched'){
-    if(metSecs.length>1) chips.push({code:'GRP:metalliser',label:_lang==='en'?'Metalliser (All)':'मेटलाइज़र (सभी)'});
-    else if(metSecs.length===1) chips.push({code:metSecs[0],label:secName(metSecs[0])||metSecs[0]});
-    if(slitSecs.length>1) chips.push({code:'GRP:slitter',label:_lang==='en'?'Slitter (All)':'स्लिटर (सभी)'});
-    else if(slitSecs.length===1) chips.push({code:slitSecs[0],label:secName(slitSecs[0])||slitSecs[0]});
-    otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  } else {
-    metSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-    slitSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-    otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  }
-  if(supSecs.length) chips.push({code:'SUP',label:secName('SUP')||'Supervisor'});
+  metPoolSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  metMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  slitPoolSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  slitMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  if(supSecs.length) chips.push({code:'GRP:supervisor',label:secName('SUP')||'Supervisor'});
   if(mgrSecs.length) chips.push({code:'MGR',label:secName('MGR')||'Manager'});
   return chips;
 }
@@ -10736,6 +10726,15 @@ async function actReg(key, status){
 let _teamSec='ALL';
 function setTeamSec(s,el){ _teamSec=s; document.querySelectorAll('#teamFilter .chip').forEach(c=>c.classList.remove('on')); el.classList.add('on'); renderTeam(); document.getElementById('tab-team')?.scrollIntoView({behavior:'smooth',block:'start'}); }
 
+function classifyResponsibility(resp){
+  const r=(resp||'').toString().toLowerCase();
+  if(/manag/.test(r)) return _lang==='en'?'Managers':'Managers';
+  if(/engineer/.test(r)) return _lang==='en'?'Engineers':'Engineers';
+  if(/assist/.test(r)) return _lang==='en'?'Assistants':'Assistants';
+  if(/operat/.test(r)) return _lang==='en'?'Operators':'Operators';
+  return _lang==='en'?'Others':'Others';
+}
+
 function renderTeam(search=''){
   _renderDynamicChips('teamFilter', _buildMachineChips('team'), _teamSec, 'setTeamSec');
   document.getElementById('teamAddBtn').innerHTML = isAdminOrMgr()
@@ -10784,7 +10783,23 @@ function renderTeam(search=''){
     if(!members || !members.length) return;
     const s = SEC[sec] || {icon:'👤', hi:sec, color:'#94a3b8', bg:'rgba(148,163,184,.1)'};
     html += `<div class="stitle">${s.icon||'👤'} ${s.hi||sec} <span style="color:${s.color||'#94a3b8'};font-size:13px">(${members.length})</span></div>`;
-    html+=members.map(e=>{
+    // Sub-group by Responsibility: Operators → Assistants → Engineers → Managers → Others
+    const RESP_ORDER=['Operators','Assistants','Engineers','Managers','Others'];
+    const respGroups={};
+    RESP_ORDER.forEach(k=>{ respGroups[k]=[]; });
+    members.forEach(e=>respGroups[classifyResponsibility(e.resp)].push(e));
+    RESP_ORDER.forEach(respKey=>{
+      const subMembers=respGroups[respKey];
+      if(!subMembers.length) return;
+      if(RESP_ORDER.filter(k=>respGroups[k].length).length>1){
+        html += `<div style="font-size:11px;font-weight:800;color:#64748b;margin:8px 0 4px 4px;letter-spacing:.5px">${respKey} (${subMembers.length})</div>`;
+      }
+      html += _renderTeamMemberCards(subMembers, s);
+    });
+    return;
+  });
+  function _renderTeamMemberCards(members, s){
+    return members.map(e=>{
       const ini=e.name.split(' ').map(n=>n[0]).join('').substring(0,2);
       const sh=getShift(e,TODAY_STR);
       const isMe=e.id===SESSION.empObjId;
@@ -10823,7 +10838,7 @@ function renderTeam(search=''){
         </div>
       </div>`;
     }).join('');
-  });
+  }
 
   const el = document.getElementById('teamList');
   el.innerHTML = html || '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">कोई कर्मचारी नहीं मिला</div></div>';
@@ -14554,7 +14569,7 @@ async function loadScheduleBuilder(){
   const headerDays = dayNums.map(d=>{
     const dt = new Date(yr, mo-1, d);
     const dow = ['S','M','T','W','T','F','S'][dt.getDay()];
-    return `<th style="min-width:32px;font-size:10px;padding:3px 2px;background:#1e293b;color:${dt.getDay()===0?'#f87171':'#94a3b8'}">${d}<br><span style="font-size:9px">${dow}</span></th>`;
+    return `<th style="min-width:32px;font-size:10px;padding:3px 2px;background:#1e293b;color:${dt.getDay()===0?'#f87171':'#94a3b8'};position:sticky;top:0;z-index:2">${d}<br><span style="font-size:9px">${dow}</span></th>`;
   }).join('');
 
   const rows = emps.map((emp,rowIdx) => {
@@ -14636,7 +14651,7 @@ async function loadScheduleBuilder(){
     <div style="overflow-x:auto;margin-bottom:14px;border-radius:8px;border:1px solid var(--border2)">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>
-          <th style="position:sticky;left:0;background:#1e293b;padding:4px 8px;font-size:11px;color:#94a3b8;text-align:left;min-width:90px">कर्मचारी</th>
+          <th style="position:sticky;left:0;top:0;z-index:3;background:#1e293b;padding:4px 8px;font-size:11px;color:#94a3b8;text-align:left;min-width:90px">कर्मचारी</th>
           ${headerDays}
         </tr></thead>
         <tbody id="sb_tbody">${rows}</tbody>
