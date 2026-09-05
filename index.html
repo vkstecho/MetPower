@@ -2494,18 +2494,7 @@ setTimeout(_forceLogin, 10000);
   <div class="sched-wrap" id="schedWrap"><table class="sched-tbl" id="schedTbl"></table></div>
   <!-- Day strip + legend shown below table -->
   <div style="margin-top:10px">
-    <div class="legend">
-      <div class="leg"><span class="shc D">D</span>दिन</div>
-      <div class="leg"><span class="shc N">N</span>रात</div>
-      <div class="leg"><span class="shc O">O</span>छुट्टी</div>
-      <div class="leg"><span class="shc L">L</span>लीव</div>
-      <div class="leg"><span class="shc CO">CO</span>C-Off</div>
-      <div class="leg"><span class="shc G">G</span>जनरल</div>
-      <div class="leg"><span class="shc HLF">½</span>Half Day</div>
-      <div class="leg"><span class="shc Ab">Ab</span>Absent</div>
-      <div class="leg"><span class="shc H">H</span>Holiday</div>
-      <div class="leg"><span class="shc OD">OD</span>Other Dept</div>
-    </div>
+    <div class="legend" id="schedLegend"></div>
   </div>
 
   <!-- ══ SHIFT TRENDS SECTION ══ -->
@@ -3739,7 +3728,7 @@ async function openEmpReorderPanel(){
     { key:'sup',       label:'👷 Supervisors',                  color:'#a78bfa',
       filter: e => e.sec==='SUP' },
     { key:'mgr',       label:'🎯 Manager',                      color:'#e879f9',
-      filter: e => e.sec==='MGR' },
+      filter: e => { const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
   ];
 
   const emps = getEmps().filter(e => e.status !== 'resigned');
@@ -4404,6 +4393,19 @@ function getSchedFilteredEmps(){
   if(schedSec==='GRP:supervisor'){
     return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; });
   }
+  if(schedSec==='GRP:metalliser'){
+    const cfg=getShiftConfigSync();
+    const metKeys=new Set((cfg.metallisers||[]).map(_normSecKey));
+    return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='MET' || metKeys.has(k); });
+  }
+  if(schedSec==='GRP:slitter'){
+    const cfg=getShiftConfigSync();
+    const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
+    return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='SLIT' || slitKeys.has(k); });
+  }
+  if(schedSec==='GRP:manager'){
+    return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='MGR' || k==='MANAGER'; });
+  }
   return all.filter(e=>e.sec===schedSec);
 }
 
@@ -4419,19 +4421,20 @@ function _buildMachineChips(kind){
   const metPoolSecs=allSecs.filter(s=>_normSecKey(s)==='MET');
   const slitPoolSecs=allSecs.filter(s=>_normSecKey(s)==='SLIT');
   const supSecs=allSecs.filter(s=>{ const k=_normSecKey(s); return k==='SUP'||k==='ALL'; });
-  const mgrSecs=allSecs.filter(s=>_normSecKey(s)==='MGR');
+  const mgrSecs=allSecs.filter(s=>{ const k=_normSecKey(s); return k==='MGR'||k==='MANAGER'; });
   const metMachineSecs=allSecs.filter(s=>metKeys.has(_normSecKey(s)) && _normSecKey(s)!=='MET');
   const slitMachineSecs=allSecs.filter(s=>slitKeys.has(_normSecKey(s)) && _normSecKey(s)!=='SLIT');
   const known=new Set([...metPoolSecs,...slitPoolSecs,...supSecs,...mgrSecs,...metMachineSecs,...slitMachineSecs]);
   const otherSecs=allSecs.filter(s=>!known.has(s));
 
-  metPoolSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  // "Met (All)" / "Slit (All)" umbrella — everyone across that machine type, pool + specific machines combined
+  if(metPoolSecs.length || metMachineSecs.length) chips.push({code:'GRP:metalliser',label:secName('MET')||(_lang==='en'?'Met (All Metalliser)':'Met (सभी Metalliser)')});
   metMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  slitPoolSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
+  if(slitPoolSecs.length || slitMachineSecs.length) chips.push({code:'GRP:slitter',label:secName('SLIT')||(_lang==='en'?'Slit (All Slitter)':'Slit (सभी Slitter)')});
   slitMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
   otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
   if(supSecs.length) chips.push({code:'GRP:supervisor',label:secName('SUP')||'Supervisor'});
-  if(mgrSecs.length) chips.push({code:'MGR',label:secName('MGR')||'Manager'});
+  if(mgrSecs.length) chips.push({code:'GRP:manager',label:_lang==='en'?'Manager':'Manager'});
   return chips;
 }
 function _renderDynamicChips(containerId, chips, activeCode, clickFnName){
@@ -8385,8 +8388,30 @@ function setSchedSec(s,el){
   document.querySelectorAll('#schedFilter .chip').forEach(c=>c.classList.remove('on'));
   el.classList.add('on'); renderSchedule(); setTimeout(syncStickyTop,80);
 }
+function renderScheduleLegend(){
+  const el=document.getElementById('schedLegend');
+  if(!el) return;
+  const cfgShifts=(getShiftConfigSync().shifts||[{code:'D',label:'दिन'},{code:'N',label:'रात'}]);
+  const shiftCls=['D','N','G']; // reuse existing colored CSS classes cyclically
+  let html='';
+  cfgShifts.forEach((s,i)=>{
+    html+=`<div class="leg"><span class="shc ${shiftCls[i%3]}">${s.code}</span>${s.label||s.code}</div>`;
+  });
+  html+=`
+    <div class="leg"><span class="shc O">O</span>छुट्टी</div>
+    <div class="leg"><span class="shc L">L</span>लीव</div>
+    <div class="leg"><span class="shc CO">CO</span>C-Off</div>
+    <div class="leg"><span class="shc G">G</span>जनरल</div>
+    <div class="leg"><span class="shc HLF">½</span>Half Day</div>
+    <div class="leg"><span class="shc Ab">Ab</span>Absent</div>
+    <div class="leg"><span class="shc H">H</span>Holiday</div>
+    <div class="leg"><span class="shc OD">OD</span>Other Dept</div>`;
+  el.innerHTML=html;
+}
+
 function renderSchedule(){
   _renderDynamicChips('schedFilter', _buildMachineChips('sched'), schedSec, 'setSchedSec');
+  renderScheduleLegend();
   const _d1=new Date(TODAY_STR+'T00:00:00'); _d1.setFullYear(_d1.getFullYear()-1);
   const _d2=new Date(TODAY_STR+'T00:00:00'); _d2.setFullYear(_d2.getFullYear()+1);
   const SCHED_MIN=_d1.toISOString().split('T')[0];
@@ -8454,7 +8479,7 @@ function renderSchedule(){
       sort: (a,b) => getEmpDisplayOrder(a) - getEmpDisplayOrder(b)
     },
     { key:'mgr',       label:'🎯 Manager', color:'var(--mgr)',
-      filter: e => e.sec==='MGR',
+      filter: e => { const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; },
       sort: (a,b) => getEmpDisplayOrder(a) - getEmpDisplayOrder(b)
     },
   ];
@@ -8550,33 +8575,31 @@ function renderSchedule(){
     });
   });
 
-  // ── Summary rows: D / N / L count per date ──
+  // ── Summary rows: one per configured shift + Leave count per date ──
   // Threshold warnings: M-1&2 → min 5, S-1&2 → min 3, Supervisor → min 2, ALL → no threshold
   const _thresh = schedSec==='M12' ? 5 : schedSec==='S12' ? 3 : schedSec==='SUP' ? 2 : 0;
   const summaryStyles = 'font-family:Barlow Condensed,sans-serif;font-weight:900;font-size:13px;text-align:center;padding:4px 2px;';
-  tbody += `<tr style="border-top:2px solid var(--border2)">
-    <td class="ecol" style="font-size:10px;font-weight:800;color:#f59e0b;padding:4px 6px;white-space:nowrap">☀️ Day</td>
-    ${dates.map(d => {
-      const cnt = allEmps.filter(e=>getShift(e,d)==='D').length;
-      const warn = _thresh > 0 && cnt > 0 && cnt < _thresh;
-      const bg = warn ? 'rgba(244,63,94,.18)' : 'rgba(245,158,11,.06)';
-      const clr = warn ? '#f43f5e' : '#f59e0b';
-      const extra = warn ? 'outline:2px solid rgba(244,63,94,.5);border-radius:3px;' : '';
-      return `<td style="${summaryStyles}color:${clr};background:${bg};${extra}">${cnt||'—'}${warn?'⚠️':''}</td>`;
-    }).join('')}
-  </tr>
-  <tr>
-    <td class="ecol" style="font-size:10px;font-weight:800;color:#818cf8;padding:4px 6px;white-space:nowrap">🌙 Night</td>
-    ${dates.map(d => {
-      const cnt = allEmps.filter(e=>getShift(e,d)==='N').length;
-      const warn = _thresh > 0 && cnt > 0 && cnt < _thresh;
-      const bg = warn ? 'rgba(244,63,94,.18)' : 'rgba(129,140,248,.06)';
-      const clr = warn ? '#f43f5e' : '#818cf8';
-      const extra = warn ? 'outline:2px solid rgba(244,63,94,.5);border-radius:3px;' : '';
-      return `<td style="${summaryStyles}color:${clr};background:${bg};${extra}">${cnt||'—'}${warn?'⚠️':''}</td>`;
-    }).join('')}
-  </tr>
-  <tr>
+  const _cfgShiftsForSummary = (getShiftConfigSync().shifts||[{code:'D',label:'Day'},{code:'N',label:'Night'}]);
+  const _shiftRowColors=[
+    {clr:'#f59e0b',bg:'rgba(245,158,11,.06)',icon:'☀️'},
+    {clr:'#818cf8',bg:'rgba(129,140,248,.06)',icon:'🌙'},
+    {clr:'#34d399',bg:'rgba(52,211,153,.06)',icon:'⏰'},
+  ];
+  _cfgShiftsForSummary.forEach((s,i)=>{
+    const colorSet=_shiftRowColors[i%3];
+    tbody += `<tr${i===0?' style="border-top:2px solid var(--border2)"':''}>
+      <td class="ecol" style="font-size:10px;font-weight:800;color:${colorSet.clr};padding:4px 6px;white-space:nowrap">${colorSet.icon} ${s.label||s.code}</td>
+      ${dates.map(d => {
+        const cnt = allEmps.filter(e=>getShift(e,d)===s.code).length;
+        const warn = _thresh > 0 && cnt > 0 && cnt < _thresh;
+        const bg = warn ? 'rgba(244,63,94,.18)' : colorSet.bg;
+        const clr = warn ? '#f43f5e' : colorSet.clr;
+        const extra = warn ? 'outline:2px solid rgba(244,63,94,.5);border-radius:3px;' : '';
+        return `<td style="${summaryStyles}color:${clr};background:${bg};${extra}">${cnt||'—'}${warn?'⚠️':''}</td>`;
+      }).join('')}
+    </tr>`;
+  });
+  tbody += `<tr>
     <td class="ecol" style="font-size:10px;font-weight:800;color:#f43f5e;padding:4px 6px;white-space:nowrap">🏖️ Leave</td>
     ${dates.map(d => {
       const cnt = allEmps.filter(e=>{const s=getShift(e,d);return s==='L'||s==='Ab';}).length;
@@ -8706,9 +8729,11 @@ function renderShiftTrends(emps, dates){
   if(!emps || emps.length === 0){ el.innerHTML=''; return; }
 
   // Count shifts for each employee across the given dates
+  const cfgShifts = (getShiftConfigSync().shifts||[{code:'D'},{code:'N'}]);
+  const shiftColClasses = ['td-d','td-n','td-g'];
+  const SHIFT_COLS = cfgShifts.map((s,i)=>({ key:s.code, label:s.code, cls:shiftColClasses[i%3] }));
   const COLS = [
-    { key:'D',   label:'D',   cls:'td-d'  },
-    { key:'N',   label:'N',   cls:'td-n'  },
+    ...SHIFT_COLS,
     { key:'O',   label:'O',   cls:'td-o'  },
     { key:'L',   label:'L',   cls:'td-l'  },
     { key:'C/O', label:'C/O', cls:'td-co' },
@@ -14634,24 +14659,26 @@ async function loadScheduleBuilder(){
   const monthLabel = new Date(yr, mo-1, 1).toLocaleDateString(_lang==='en'?'en-IN':'hi-IN',{month:'long',year:'numeric'});
 
   openModal(`<div class="modal-handle"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div class="modal-title" style="margin:0">📅 ${monthLabel}</div>
-      <button onclick="openScheduleBuilder()" style="background:none;border:1px solid var(--border2);border-radius:8px;color:var(--muted);padding:5px 10px;cursor:pointer;font-size:12px">← बदलें</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
-      <div id="sbCellLegend" style="font-size:11px;color:var(--muted2);flex:1">🖱️ Drag करके Cells चुनें · Double-tap करके Copy/Select करें</div>
-      <button onclick="autoGenSchedule('${monthKey}')"
-        style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;border-radius:10px;
-        color:#fff;font-size:12px;font-weight:800;padding:8px 14px;cursor:pointer;white-space:nowrap;
-        display:flex;align-items:center;gap:5px;font-family:inherit">
-        🤖 Auto बनाएं
-      </button>
+    <div id="sbStickyHeader" style="position:sticky;top:0;z-index:10;background:var(--bg);padding-bottom:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="modal-title" style="margin:0">📅 ${monthLabel}</div>
+        <button onclick="openScheduleBuilder()" style="background:none;border:1px solid var(--border2);border-radius:8px;color:var(--muted);padding:5px 10px;cursor:pointer;font-size:12px">← बदलें</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div id="sbCellLegend" style="font-size:11px;color:var(--muted2);flex:1">🖱️ Drag करके Cells चुनें · Double-tap करके Copy/Select करें</div>
+        <button onclick="autoGenSchedule('${monthKey}')"
+          style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border:none;border-radius:10px;
+          color:#fff;font-size:12px;font-weight:800;padding:8px 14px;cursor:pointer;white-space:nowrap;
+          display:flex;align-items:center;gap:5px;font-family:inherit">
+          🤖 Auto बनाएं
+        </button>
+      </div>
     </div>
     <div id="sbToolbar" style="display:none"></div>
     <div style="overflow-x:auto;margin-bottom:14px;border-radius:8px;border:1px solid var(--border2)">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>
-          <th style="position:sticky;left:0;top:0;z-index:3;background:#1e293b;padding:4px 8px;font-size:11px;color:#94a3b8;text-align:left;min-width:90px">कर्मचारी</th>
+          <th id="sbCornerHeader" style="position:sticky;left:0;top:0;z-index:3;background:#1e293b;padding:4px 8px;font-size:11px;color:#94a3b8;text-align:left;min-width:90px">कर्मचारी</th>
           ${headerDays}
         </tr></thead>
         <tbody id="sb_tbody">${rows}</tbody>
@@ -14662,6 +14689,7 @@ async function loadScheduleBuilder(){
       <button class="cancel-btn" style="flex:1" onclick="closeModal()">रद्द करें</button>
     </div>`);
   setTimeout(initSBSelection, 50);
+  setTimeout(_sbPositionStickyTableHeader, 60);
   }catch(err){console.error('loadScheduleBuilder error:',err);toast('❌ Error: '+err.message);}
 }
 
@@ -14697,6 +14725,16 @@ function _sbSetCellValue(cell, val){
     _sbData[empId]=Array.from(allCells).map(c=>c.dataset.val||'');
   }
   _sbData[empId][dayIdx]=val;
+}
+
+function _sbPositionStickyTableHeader(){
+  const headerEl=document.getElementById('sbStickyHeader');
+  const tbody=document.getElementById('sb_tbody');
+  if(!headerEl || !tbody) return;
+  const h=headerEl.offsetHeight;
+  const thead=tbody.closest('table')?.querySelector('thead');
+  if(!thead) return;
+  thead.querySelectorAll('th').forEach(th=>{ th.style.top=h+'px'; });
 }
 
 function initSBSelection(){
