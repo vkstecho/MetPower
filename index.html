@@ -15048,16 +15048,50 @@ function autoGenSchedule(monthKey){
     const rotationOrder = configShiftCodes.length===3
       ? [configShiftCodes[0], configShiftCodes[2], configShiftCodes[1]]
       : configShiftCodes;
-    const lastInfo = findLastShiftBeforeMonth(emp, yr, mo, configShiftCodes);
-    let curShiftIdx = rotationOrder.indexOf(lastInfo.shift);
-    if(curShiftIdx===-1) curShiftIdx=0;
-    for(let i = 0; i < (lastInfo.offsAfter || 0); i++){
-      curShiftIdx = (curShiftIdx+1) % rotationOrder.length;
+
+    // ── Check the currently-open grid for already-filled days first ──
+    // (manually set, or from a previous partial generation). If found, PRESERVE
+    // those days untouched and continue the rotation correctly from the last
+    // filled day, instead of blindly regenerating the whole month from scratch.
+    const cellsArr = Array.from(cells).sort((a,b)=>(+a.dataset.day)-(+b.dataset.day));
+    let lastFilledDayIdx = -1;
+    let lastFilledShift = null;
+    let offsSinceLastShift = 0;
+    cellsArr.forEach((c,i)=>{
+      const v = c.dataset.val || '';
+      if(v){
+        lastFilledDayIdx = i;
+        if(configShiftCodes.includes(v)){ lastFilledShift = v; offsSinceLastShift = 0; }
+        else if(v === 'O'){ offsSinceLastShift++; }
+      }
+    });
+
+    let curShiftIdx, startDay;
+    if(lastFilledDayIdx >= 0 && lastFilledShift){
+      // Continue from already-filled data already sitting in this month's grid
+      curShiftIdx = rotationOrder.indexOf(lastFilledShift);
+      if(curShiftIdx===-1) curShiftIdx=0;
+      for(let i=0;i<offsSinceLastShift;i++){ curShiftIdx=(curShiftIdx+1)%rotationOrder.length; }
+      startDay = lastFilledDayIdx + 1; // only generate days AFTER the last already-filled day
+    }else{
+      // Nothing filled yet this month at all — fall back to previous month's continuation
+      const lastInfo = findLastShiftBeforeMonth(emp, yr, mo, configShiftCodes);
+      curShiftIdx = rotationOrder.indexOf(lastInfo.shift);
+      if(curShiftIdx===-1) curShiftIdx=0;
+      for(let i = 0; i < (lastInfo.offsAfter || 0); i++){
+        curShiftIdx = (curShiftIdx+1) % rotationOrder.length;
+      }
+      startDay = 0;
     }
 
-    // Generate the month — protect approved leaves
+    // Generate — preserve already-filled days as-is, protect approved leaves,
+    // and only auto-fill days from startDay onwards
     const schedule = [];
     for(let d = 0; d < daysInMonth; d++){
+      if(d < startDay){
+        schedule.push(cellsArr[d] ? (cellsArr[d].dataset.val || '') : '');
+        continue;
+      }
       const dateStr = `${yr}-${String(mo).padStart(2,'0')}-${String(d+1).padStart(2,'0')}`;
       const dow = new Date(yr, mo-1, d+1).getDay();
 
@@ -15091,7 +15125,7 @@ function _applyScheduleToGrid(empId, schedule, cells, empLeaves, yr, mo){
 
     cell.dataset.val = val;
     cell.className = 'shc ' + (val ? cellClass(val) : '');
-    cell.style.cssText = 'width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset'
+    cell.style.cssText = 'width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset;touch-action:none;user-select:none'
       + (isLeaveProtected ? ';outline:2px solid #f43f5e;border-radius:4px;box-shadow:0 0 4px rgba(244,63,94,.5)' : '');
     cell.textContent = val ? cellDisp(val) : '—';
 
