@@ -67,7 +67,7 @@ const CFG = {
   adminCreds:[], // Empty — all auth goes through Firebase
   supervisorInstructor: 'MOHIT',
   minShift: { metalliser:4, slitter:3 },
-  shiftLabels: { D:'दिन (7AM-7PM)', N:'रात (7PM-7AM)', O:'साप्ताहिक छुट्टी', L:'लीव', G:'जनरल', 'C/O':'Comp Off' },
+  shiftLabels: { D:'दिन (7AM-7PM)', N:'रात (7PM-7AM)', A:'A Shift', B:'B Shift', C:'C Shift', O:'साप्ताहिक छुट्टी', L:'लीव', G:'जनरल', 'C/O':'Comp Off' },
   // ── Contact numbers (update here, applies everywhere) ──
   contactVivek:  '+918168771239',   // Manager VIVEK — device approvals, access extensions
   contactAdmin:  '+918929394920',   // Admin — login approvals
@@ -865,10 +865,13 @@ function myShiftConfigKey(companyIdOverride){
 }
 function _defaultShiftConfig(){
   return {
-    shiftCount: 2,
+    shiftCount: 5,
     shifts: [
-      {code:'D', label:'दिन शिफ्ट', start:'08:00', end:'20:00'},
-      {code:'N', label:'रात शिफ्ट', start:'20:00', end:'08:00'}
+      {code:'D', label:'Day Shift', start:'08:00', end:'20:00'},
+      {code:'N', label:'Night Shift', start:'20:00', end:'08:00'},
+      {code:'A', label:'A Shift', start:'06:00', end:'14:00'},
+      {code:'B', label:'B Shift', start:'14:00', end:'22:00'},
+      {code:'C', label:'C Shift', start:'22:00', end:'06:00'}
     ],
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
@@ -3154,18 +3157,32 @@ async function openShiftSettings(){
 
 function _renderShiftSettingsModal(){
   const d=_shiftDraft;
+  // Ensure all standard shifts D,N,A,B,C are present so managers only edit times
+  const std = [
+    {code:'D', label:'Day Shift', start:'08:00', end:'20:00'},
+    {code:'N', label:'Night Shift', start:'20:00', end:'08:00'},
+    {code:'A', label:'A Shift', start:'06:00', end:'14:00'},
+    {code:'B', label:'B Shift', start:'14:00', end:'22:00'},
+    {code:'C', label:'C Shift', start:'22:00', end:'06:00'}
+  ];
+  const byCode = {};
+  (d.shifts||[]).forEach(s=>{ if(s && s.code) byCode[String(s.code).toUpperCase()]=s; });
+  d.shifts = std.map(s=>({
+    code: s.code,
+    label: (byCode[s.code] && byCode[s.code].label) || s.label,
+    start: (byCode[s.code] && byCode[s.code].start) || s.start,
+    end: (byCode[s.code] && byCode[s.code].end) || s.end
+  }));
+  d.shiftCount = 5;
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">⚙️ Shift & Machine Settings</div>
   <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">
     ${isAdmin()?'Company: <b style="color:var(--text)">'+(SESSION.viewCompanyId||'').toUpperCase()+'</b>':'आपकी अपनी Team के लिए'}
   </div>
 
-  <div class="field">
-    <label>Shift Pattern</label>
-    <select id="ss_shiftCount" onchange="_onShiftCountChange(this.value)">
-      <option value="2"${d.shiftCount===2?' selected':''}>2 Shifts (Day / Night)</option>
-      <option value="3"${d.shiftCount===3?' selected':''}>3 Shifts (A / B / C)</option>
-    </select>
+  <div style="font-size:12px;font-weight:800;color:#f97316;margin:4px 0 8px">⏰ Shift Timings (D / N / A / B / C — सभी managers के लिए खुले)</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.5">
+    सभी shifts schedule में उपलब्ध रहेंगी। यहाँ सिर्फ timing सेट करें — वही timing section के नीचे schedule में दिखेगी।
   </div>
   <div id="ss_shiftTimings">${_renderShiftTimingRows()}</div>
 
@@ -3188,8 +3205,8 @@ function _renderShiftSettingsModal(){
 function _renderShiftTimingRows(){
   return _shiftDraft.shifts.map((s,i)=>`
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-      <input type="text" value="${s.code}" placeholder="Code" maxlength="2" style="width:50px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;text-align:center;font-weight:800" oninput="_shiftDraft.shifts[${i}].code=this.value.toUpperCase()">
-      <input type="text" value="${s.label}" placeholder="नाम (जैसे Day)" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].label=this.value">
+      <input type="text" value="${s.code}" readonly style="width:42px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;text-align:center;font-weight:900">
+      <input type="text" value="${s.label}" placeholder="नाम" style="flex:1;min-width:70px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].label=this.value">
       <input type="time" value="${s.start}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].start=this.value">
       <span style="color:#64748b;font-size:11px">to</span>
       <input type="time" value="${s.end}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].end=this.value">
@@ -3205,21 +3222,10 @@ function _renderMachineRows(field){
 }
 
 function _onShiftCountChange(val){
-  const n=Number(val);
-  _shiftDraft.shiftCount=n;
-  if(n===2){
-    _shiftDraft.shifts=[
-      {code:'D',label:'Day',start:'08:00',end:'20:00'},
-      {code:'N',label:'Night',start:'20:00',end:'08:00'}
-    ];
-  }else{
-    _shiftDraft.shifts=[
-      {code:'A',label:'A Shift',start:'06:00',end:'14:00'},
-      {code:'B',label:'B Shift',start:'14:00',end:'22:00'},
-      {code:'C',label:'C Shift',start:'22:00',end:'06:00'}
-    ];
+  // Legacy no-op: all managers always have D,N,A,B,C; only times are edited in profile settings
+  if(document.getElementById('ss_shiftTimings')){
+    document.getElementById('ss_shiftTimings').innerHTML=_renderShiftTimingRows();
   }
-  document.getElementById('ss_shiftTimings').innerHTML=_renderShiftTimingRows();
 }
 
 function _addMachine(field){
@@ -3627,8 +3633,20 @@ function getShift(emp, dateStr){
 
   return '';
 }
-function cellClass(s){ if(!s) return 'blank'; const m={'D':'D','N':'N','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'HLF','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||'O'; }
-function cellDisp(s){  if(!s) return ''; const m={'D':'D','N':'N','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'½','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||s||''; }
+function cellClass(s){ if(!s) return 'blank'; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'HLF','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||'O'; }
+function cellDisp(s){  if(!s) return ''; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'½','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||s||''; }
+function getShiftTimingStripHtml(){
+  const cfg=getShiftConfigSync();
+  const shifts=(cfg.shifts||[]).filter(s=>s&&s.code&&['D','N','A','B','C'].includes(String(s.code).toUpperCase()));
+  if(!shifts.length) return '';
+  const bits=shifts.map(s=>{
+    const code=String(s.code).toUpperCase();
+    const t=(s.start&&s.end)?`${s.start}–${s.end}`:'';
+    return `<span class="shc ${cellClass(code)}" style="width:auto;min-width:22px;height:18px;padding:0 5px;font-size:10px;margin-right:2px">${code}</span><span style="font-size:10px;color:var(--muted2);margin-right:10px">${s.label||code}${t?' · '+t:''}</span>`;
+  }).join('');
+  return `<div style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:2px 0;opacity:.95">${bits}</div>`;
+}
+
 
 // ── Get joining date: first non-blank shift in EXCEL_SCHEDULES ──
 function getJoiningDate(emp){
@@ -3771,7 +3789,7 @@ async function renderHome(){
       const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
       const sh = getShift(e, dateStr);
       const isT = dateStr===TODAY_STR;
-      const shBg = {'D':'#f59e0b','N':'#4f46e5','O':'#334155','L':'#be123c','G':'#0284c7','CO':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'}[cellClass(sh)]||'#334155';
+      const shBg = {'D':'#f59e0b','N':'#4f46e5','A':'#16a34a','B':'#db2777','C':'#0891b2','O':'#334155','L':'#be123c','G':'#0284c7','CO':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'}[cellClass(sh)]||'#334155';
       const _infoShifts = ['L','CO','C/O','OD','Ab','HLF'];
       const _calClick = _infoShifts.includes(sh) ? `onclick="showShiftInfo('${e.id}','${e.name.replace(/'/g,"\\'")}','${dateStr}','${sh}')"` : '';
       calHtml += `<div ${_calClick} style="text-align:center;border-radius:10px;padding:6px 2px;cursor:${_infoShifts.includes(sh)?'pointer':'default'};background:${isT?'rgba(249,115,22,.18)':'rgba(255,255,255,.03)'};border:${isT?'2px solid rgba(249,115,22,.7)':'1px solid rgba(255,255,255,.06)'}">
@@ -4434,7 +4452,7 @@ async function sendFast2Sms(apiKey, phone, message){
 
 // Build the SMS message for a shift change
 function buildShiftSms(empName, date, shift){
-  const shiftNames = { D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Compensatory Off', HLF:'Half Day', Ab:'Absent' };
+  const shiftNames = { D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', A:'A Shift', B:'B Shift', C:'C Shift', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Compensatory Off', HLF:'Half Day', Ab:'Absent' };
   const shiftLabel = shiftNames[shift] || shift;
   const fmtD = new Date(date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
   return `GLS Polyfilms MP System:
@@ -4522,7 +4540,7 @@ function handleSchedCellClick(td, empId, empName, date, origSh){
 // ── Show Leave/CO/OD reason on cell click (for all users) ──
 function showShiftInfo(empId, empName, date, shiftVal){
   const fmtD = new Date(date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric',weekday:'long'});
-  const shiftNames = {D:'Day Shift',N:'Night Shift',O:'Weekly Off',L:'Leave',G:'General','C/O':'Comp Off',CO:'Comp Off',HLF:'Half Day',Ab:'Absent',GP:'Gate Pass',H:'Holiday',OD:'Other Dept'};
+  const shiftNames = {D:'Day Shift',N:'Night Shift',A:'A Shift',B:'B Shift',C:'C Shift',O:'Weekly Off',L:'Leave',G:'General','C/O':'Comp Off',CO:'Comp Off',HLF:'Half Day',Ab:'Absent',GP:'Gate Pass',H:'Holiday',OD:'Other Dept'};
   
   // Search for leave record
   const leaves = getLeaves().filter(l => l.empId===empId && l.status!=='rejected' && l.from<=date && l.to>=date);
@@ -4922,11 +4940,13 @@ function setSchedSec(s,el){
 function renderScheduleLegend(){
   const el=document.getElementById('schedLegend');
   if(!el) return;
-  const cfgShifts=_discoverAllShiftCodes(getEmps(), getShiftConfigSync().shifts||[{code:'D',label:'दिन'},{code:'N',label:'रात'}]);
-  const shiftCls=['D','N','G']; // reuse existing colored CSS classes cyclically
+  const cfg=getShiftConfigSync();
+  const cfgShifts=(cfg.shifts&&cfg.shifts.length)?cfg.shifts:[{code:'D',label:'Day'},{code:'N',label:'Night'},{code:'A',label:'A'},{code:'B',label:'B'},{code:'C',label:'C'}];
   let html='';
-  cfgShifts.forEach((s,i)=>{
-    html+=`<div class="leg"><span class="shc ${shiftCls[i%3]}">${s.code}</span>${s.label||s.code}</div>`;
+  cfgShifts.forEach(s=>{
+    const code=String(s.code||'').toUpperCase();
+    const time=(s.start&&s.end)?` ${s.start}–${s.end}`:'';
+    html+=`<div class="leg"><span class="shc ${cellClass(code)}">${code}</span>${s.label||code}${time}</div>`;
   });
   html+=`
     <div class="leg"><span class="shc O">O</span>छुट्टी</div>
@@ -5067,7 +5087,7 @@ function renderSchedule(){
   DISPLAY_ORDER.forEach(group=>{
     const members = allEmps.filter(group.filter).sort(group.sort);
     if(!members.length) return;
-    tbody+=`<tr class="sec-row"><td colspan="${dates.length+1}"><span class="sec-row-lbl" style="color:${group.color}">${group.label}</span></td></tr>`;
+    tbody+=`<tr class="sec-row"><td colspan="${dates.length+1}"><span class="sec-row-lbl" style="color:${group.color}">${group.label}</span>${getShiftTimingStripHtml()}</td></tr>`;
     members.forEach(emp=>{
       const isMe=emp.id===SESSION.empObjId;
       const role=getEmpRole(emp);
@@ -5111,13 +5131,22 @@ function renderSchedule(){
   const _thresh = schedSec==='M12' ? 5 : schedSec==='S12' ? 3 : schedSec==='SUP' ? 2 : 0;
   const summaryStyles = 'font-family:Barlow Condensed,sans-serif;font-weight:900;font-size:13px;text-align:center;padding:4px 2px;';
   const _cfgShiftsForSummary = _discoverAllShiftCodes(allEmps, getShiftConfigSync().shifts||[{code:'D',label:'Day'},{code:'N',label:'Night'}]);
+  const _shiftRowColorMap={
+    D:{clr:'#f59e0b',bg:'rgba(245,158,11,.06)',icon:'☀️'},
+    N:{clr:'#818cf8',bg:'rgba(129,140,248,.06)',icon:'🌙'},
+    A:{clr:'#16a34a',bg:'rgba(22,163,74,.08)',icon:'🅰️'},
+    B:{clr:'#db2777',bg:'rgba(219,39,119,.08)',icon:'🅱️'},
+    C:{clr:'#0891b2',bg:'rgba(8,145,178,.08)',icon:'©️'},
+  };
   const _shiftRowColors=[
     {clr:'#f59e0b',bg:'rgba(245,158,11,.06)',icon:'☀️'},
     {clr:'#818cf8',bg:'rgba(129,140,248,.06)',icon:'🌙'},
-    {clr:'#34d399',bg:'rgba(52,211,153,.06)',icon:'⏰'},
+    {clr:'#16a34a',bg:'rgba(22,163,74,.08)',icon:'🅰️'},
+    {clr:'#db2777',bg:'rgba(219,39,119,.08)',icon:'🅱️'},
+    {clr:'#0891b2',bg:'rgba(8,145,178,.08)',icon:'©️'},
   ];
   _cfgShiftsForSummary.forEach((s,i)=>{
-    const colorSet=_shiftRowColors[i%3];
+    const colorSet=_shiftRowColorMap[String(s.code||"").toUpperCase()]||_shiftRowColors[i%_shiftRowColors.length];
     tbody += `<tr${i===0?' style="border-top:2px solid var(--border2)"':''}>
       <td class="ecol" style="font-size:10px;font-weight:800;color:${colorSet.clr};padding:4px 6px;white-space:nowrap">${colorSet.icon} ${s.label||s.code}</td>
       ${dates.map(d => {
@@ -10330,7 +10359,7 @@ async function saveAllShiftChanges(){
         if(!emp || !emp.phone || emp.phone.length !== 10) continue;
         if(emp.id === SESSION.empObjId) continue; // don't notify self
 
-        const shiftNames = {D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Comp Off', HLF:'Half Day', Ab:'Absent', H:'Holiday', OD:'Other Dept', GP:'Gate Pass'};
+        const shiftNames = {D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', A:'A Shift', B:'B Shift', C:'C Shift', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Comp Off', HLF:'Half Day', Ab:'Absent', H:'Holiday', OD:'Other Dept', GP:'Gate Pass'};
         const allCO = changes.every(c => c.newShift === 'C/O');
         const allAb = changes.every(c => c.newShift === 'Ab');
         const todayFmt = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
@@ -10617,11 +10646,24 @@ function editShiftCell(empId, empName, date, currentShift){
   if(!isAdminOrMgr()){ return; }
 
   const _cfg = getShiftConfigSync();
-  const _shiftColors = [
-    {bg:'#f59e0b',color:'#000'}, {bg:'#4338ca',color:'#fff'}, {bg:'#0d9488',color:'#ccfbf1'}
-  ];
+  const _fixedShiftStyle = {
+    D:{bg:'#f59e0b',color:'#000'}, N:{bg:'#4f46e5',color:'#fff'},
+    A:{bg:'#16a34a',color:'#fff'}, B:{bg:'#db2777',color:'#fff'}, C:{bg:'#0891b2',color:'#fff'},
+    O:{bg:'#334155',color:'#94a3b8'}, L:{bg:'#9f1239',color:'#fda4af'}, G:{bg:'#0c4a6e',color:'#7dd3fc'},
+    'C/O':{bg:'#713f12',color:'#fde68a'}, H:{bg:'#ea580c',color:'#fff'}, OD:{bg:'#0d9488',color:'#ccfbf1'},
+    GP:{bg:'#6d28d9',color:'#e9d5ff'}, HLF:{bg:'#f97316',color:'#fff'}, Ab:{bg:'#450a0a',color:'#fca5a5'}
+  };
+  // Always offer D,N,A,B,C for every manager; merge timing labels from config
+  const _stdCodes = ['D','N','A','B','C'];
+  const _cfgByCode = {};
+  (_cfg.shifts||[]).forEach(s=>{ if(s&&s.code) _cfgByCode[String(s.code).toUpperCase()]=s; });
   const SHIFT_OPTIONS = [
-    ...(_cfg.shifts||[]).map((s,i)=>({v:s.code, label:s.label+(s.start&&s.end?` (${s.start}–${s.end})`:''), bg:_shiftColors[i%3].bg, color:_shiftColors[i%3].color})),
+    ..._stdCodes.map(code=>{
+      const s=_cfgByCode[code]||{code,label:code};
+      const st=_fixedShiftStyle[code]||{bg:'#334155',color:'#fff'};
+      const time=(s.start&&s.end)?` (${s.start}–${s.end})`:'';
+      return {v:code, label:(s.label||code)+time, bg:st.bg, color:st.color};
+    }),
     {v:'O',   label:'साप्ताहिक छुट्टी', bg:'#334155', color:'#94a3b8'},
     {v:'L',   label:'Leave',            bg:'#9f1239', color:'#fda4af'},
     {v:'G',   label:'General Shift',    bg:'#0c4a6e', color:'#7dd3fc'},
@@ -11037,7 +11079,7 @@ async function resetShiftOverride(empId, date){
 // DYNAMIC SCHEDULE BUILDER — Admin
 // ════════════════════════════════════════════════════════
 
-const SHIFT_QUICK = ['D','N','O','L','G','C/O','HLF','Ab'];
+const SHIFT_QUICK = ['D','N','A','B','C','O','L','G','C/O','HLF','Ab'];
 
 function openScheduleBuilder(){
   const now = new Date();
@@ -11815,10 +11857,14 @@ function printSched(){
 }
 
 async function _execPrint(){
-  // Gather selected group ids
+  // Gather selected group ids BEFORE closing modal (DOM still present)
   const selectedIds = [...document.querySelectorAll('[id^=prtchk_]')]
     .filter(c=>c.checked).map(c=>c.id.replace('prtchk_',''));
   if(!selectedIds.length){ toast('❌ कम से कम एक section चुनें'); return; }
+  if(typeof html2canvas !== 'function'){
+    toast('❌ Print library load नहीं हुई — page refresh करके फिर try करें');
+    return;
+  }
   closeModal();
 
   // Redefine groups with filters
@@ -11854,8 +11900,8 @@ async function _execPrint(){
   const sectionLabel = selectedIds.length === 8 ? 'All Sections' : selectedIds.map(id=>sectionNames[id]||id).join(' + ');
 
   // Shift colours
-  const SBG={D:'#f59e0b',N:'#4338ca',O:'#dcfce7',L:'#fee2e2','C/O':'#ede9fe',G:'#e0f2fe',H:'#ffedd5',OD:'#ccfbf1',HLF:'#fed7aa',Ab:'#fecaca',GP:'#fdf4ff'};
-  const SCL={D:'#000',N:'#fff',O:'#16a34a',L:'#dc2626','C/O':'#7c3aed',G:'#0369a1',H:'#c2410c',OD:'#0d9488',HLF:'#c2410c',Ab:'#991b1b',GP:'#9333ea'};
+  const SBG={D:'#f59e0b',N:'#4f46e5',A:'#16a34a',B:'#db2777',C:'#0891b2',O:'#dcfce7',L:'#fee2e2','C/O':'#ede9fe',G:'#e0f2fe',H:'#ffedd5',OD:'#ccfbf1',HLF:'#fed7aa',Ab:'#fecaca',GP:'#fdf4ff'};
+  const SCL={D:'#000',N:'#fff',A:'#fff',B:'#fff',C:'#fff',O:'#16a34a',L:'#dc2626','C/O':'#7c3aed',G:'#0369a1',H:'#c2410c',OD:'#0d9488',HLF:'#c2410c',Ab:'#991b1b',GP:'#9333ea'};
 
   // Build tbody
   let tbodyHtml='';
@@ -11909,7 +11955,7 @@ async function _execPrint(){
   }).join('');
 
   // Legend
-  const LI=[{bg:'#f59e0b',c:'#000',t:'D = Day (7AM–7PM)'},{bg:'#4338ca',c:'#fff',t:'N = Night (7PM–7AM)'},{bg:'#dcfce7',c:'#16a34a',t:'O = Weekly Off'},{bg:'#fee2e2',c:'#dc2626',t:'L = Leave'},{bg:'#ede9fe',c:'#7c3aed',t:'C/O = Comp Off'},{bg:'#e0f2fe',c:'#0369a1',t:'G = General'},{bg:'#ffedd5',c:'#c2410c',t:'H = Holiday'},{bg:'#ccfbf1',c:'#0d9488',t:'OD = Other Dept'},{bg:'#ede9fe',c:'#6d28d9',t:'GP = Gate Pass'},{bg:'#fed7aa',c:'#c2410c',t:'½ = Half Day'},{bg:'#fecaca',c:'#991b1b',t:'Ab = Absent'}];
+  const LI=[{bg:'#f59e0b',c:'#000',t:'D = Day'},{bg:'#4f46e5',c:'#fff',t:'N = Night'},{bg:'#16a34a',c:'#fff',t:'A = A Shift'},{bg:'#db2777',c:'#fff',t:'B = B Shift'},{bg:'#0891b2',c:'#fff',t:'C = C Shift'},{bg:'#dcfce7',c:'#16a34a',t:'O = Weekly Off'},{bg:'#fee2e2',c:'#dc2626',t:'L = Leave'},{bg:'#ede9fe',c:'#7c3aed',t:'C/O = Comp Off'},{bg:'#e0f2fe',c:'#0369a1',t:'G = General'},{bg:'#ffedd5',c:'#c2410c',t:'H = Holiday'},{bg:'#ccfbf1',c:'#0d9488',t:'OD = Other Dept'},{bg:'#ede9fe',c:'#6d28d9',t:'GP = Gate Pass'},{bg:'#fed7aa',c:'#c2410c',t:'½ = Half Day'},{bg:'#fecaca',c:'#991b1b',t:'Ab = Absent'}];
   const legendHtml=LI.map(i=>`<span style="display:inline-flex;align-items:center;gap:3px">
     <span style="display:inline-block;width:19px;height:15px;background:${i.bg};color:${i.c};border-radius:2px;font-weight:900;font-size:9px;text-align:center;line-height:15px;border:1px solid rgba(0,0,0,.2)">${i.t.split(' ')[0]}</span>
     <span style="color:#444;font-size:9px">${i.t.split('= ')[1]}</span>
@@ -16504,7 +16550,7 @@ function _timeAgo(dateStr){
 async function pushShiftNotification(empObjId, empName, date, oldShift, newShift, changedBy){
   try{
     const fmtD = new Date(date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-    const shiftNames = {D:'Day',N:'Night',O:'Off',L:'Leave',G:'General','C/O':'C-Off',CO:'C-Off',HLF:'Half Day',Ab:'Absent',GP:'Gate Pass',H:'Holiday',OD:'Other Dept'};
+    const shiftNames = {D:'Day',N:'Night',A:'A',B:'B',C:'C',O:'Off',L:'Leave',G:'General','C/O':'C-Off',CO:'C-Off',HLF:'Half Day',Ab:'Absent',GP:'Gate Pass',H:'Holiday',OD:'Other Dept'};
     const body = `${fmtD} को आपकी shift ${shiftNames[oldShift]||oldShift} से ${shiftNames[newShift]||newShift} में बदली गई`;
     
     await fbPush('userNotifications/'+empObjId, {
