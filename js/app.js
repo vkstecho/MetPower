@@ -865,18 +865,45 @@ function myShiftConfigKey(companyIdOverride){
 }
 function _defaultShiftConfig(){
   return {
-    shiftCount: 5,
+    shiftCount: 2,
     shifts: [
-      {code:'D', label:'Day Shift', start:'08:00', end:'20:00'},
-      {code:'N', label:'Night Shift', start:'20:00', end:'08:00'},
-      {code:'A', label:'A Shift', start:'06:00', end:'14:00'},
-      {code:'B', label:'B Shift', start:'14:00', end:'22:00'},
-      {code:'C', label:'C Shift', start:'22:00', end:'06:00'}
+      {code:'D', label:'Day Shift', start:'08:00', end:'20:00', active:true},
+      {code:'N', label:'Night Shift', start:'20:00', end:'08:00', active:true},
+      {code:'A', label:'A Shift', start:'06:00', end:'14:00', active:false},
+      {code:'B', label:'B Shift', start:'14:00', end:'22:00', active:false},
+      {code:'C', label:'C Shift', start:'22:00', end:'06:00', active:false}
     ],
+    // Minimum headcount per day — below this, summary cells highlight red
+    minMet: 5,
+    minSlit: 3,
+    minSup: 2,
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
     updatedAt: null
   };
+}
+/** Shifts used by Auto-generate (only active ones). Falls back to D+N. */
+function getActiveRotationCodes(){
+  const cfg = getShiftConfigSync();
+  const active = (cfg.shifts||[]).filter(s=>s && s.code && s.active!==false).map(s=>String(s.code).toUpperCase());
+  // Prefer only D/N/A/B/C for rotation (exclude status codes if any leaked in)
+  const work = active.filter(c=>['D','N','A','B','C'].includes(c));
+  if(work.length) return work;
+  return ['D','N'];
+}
+function getMinStaffForFilter(){
+  const cfg = getShiftConfigSync();
+  const minMet = Number(cfg.minMet); const minSlit = Number(cfg.minSlit); const minSup = Number(cfg.minSup);
+  if(schedSec==='M12' || schedSec==='GRP:metalliser' || (schedSec&&String(schedSec).startsWith('M')))
+    return isFinite(minMet)&&minMet>0 ? minMet : 5;
+  if(schedSec==='S12' || schedSec==='GRP:slitter' || (schedSec&&String(schedSec).startsWith('S')))
+    return isFinite(minSlit)&&minSlit>0 ? minSlit : 3;
+  if(schedSec==='SUP' || schedSec==='GRP:supervisor')
+    return isFinite(minSup)&&minSup>0 ? minSup : 2;
+  // Single machine chips M1/M2/S1/S2
+  if(['M1','M2'].includes(schedSec)) return isFinite(minMet)&&minMet>0 ? minMet : 5;
+  if(['S1','S2'].includes(schedSec)) return isFinite(minSlit)&&minSlit>0 ? minSlit : 3;
+  return 0; // ALL — no threshold
 }
 function getShiftConfigSync(){
   const key=myShiftConfigKey();
@@ -1093,6 +1120,33 @@ function applyLang(){
   if(msBtn && !(typeof _msActive !== 'undefined' && _msActive)){
     msBtn.textContent = isEn ? '☑️ Multi-Select' : '☑️ Multi-Select';
   }
+
+  // Page titles & static chips
+  const pageMap = {
+    pageTitleLeaves: {hi:'अवकाश (Leaves)', en:'Leaves'},
+    pageTitleTeam: {hi:'टीम', en:'Team'},
+  };
+  Object.entries(pageMap).forEach(([id,txt])=>{
+    const el=document.getElementById(id);
+    if(el) el.textContent = isEn ? txt.en : txt.hi;
+  });
+  // Leave filter chips
+  document.querySelectorAll('#tab-leave .chip, [onclick*="setLF"]').forEach(el=>{
+    const raw=(el.textContent||'').trim();
+    if(!raw) return;
+    if(isEn){ const tr=typeof t==='function'?t(raw):raw; if(tr!==raw) el.textContent=tr; }
+  });
+  // Save bar
+  const saveTitle=document.getElementById('saveBarTitle');
+  if(saveTitle) saveTitle.textContent = isEn ? '📝 Changes pending' : '📝 बदलाव pending हैं';
+  document.querySelectorAll('#schedSaveBar button').forEach(el=>{
+    const raw=(el.textContent||'').trim();
+    if(isEn && typeof t==='function'){ const tr=t(raw); if(tr!==raw) el.textContent=tr; }
+  });
+  // Multi-select cancel
+  document.querySelectorAll('.ms-cancel').forEach(el=>{
+    el.textContent = isEn ? '✕ Cancel' : '✕ रद्द करें · Cancel';
+  });
 
   // ── All "सभी" / "All" filter chips ──
   document.querySelectorAll('[data-i18n-all]').forEach(el => {
@@ -3157,34 +3211,67 @@ async function openShiftSettings(){
 
 function _renderShiftSettingsModal(){
   const d=_shiftDraft;
-  // Ensure all standard shifts D,N,A,B,C are present so managers only edit times
+  // Merge standard D,N,A,B,C — preserve active/times from saved config
   const std = [
-    {code:'D', label:'Day Shift', start:'08:00', end:'20:00'},
-    {code:'N', label:'Night Shift', start:'20:00', end:'08:00'},
-    {code:'A', label:'A Shift', start:'06:00', end:'14:00'},
-    {code:'B', label:'B Shift', start:'14:00', end:'22:00'},
-    {code:'C', label:'C Shift', start:'22:00', end:'06:00'}
+    {code:'D', label:'Day Shift', start:'08:00', end:'20:00', active:true},
+    {code:'N', label:'Night Shift', start:'20:00', end:'08:00', active:true},
+    {code:'A', label:'A Shift', start:'06:00', end:'14:00', active:false},
+    {code:'B', label:'B Shift', start:'14:00', end:'22:00', active:false},
+    {code:'C', label:'C Shift', start:'22:00', end:'06:00', active:false}
   ];
   const byCode = {};
   (d.shifts||[]).forEach(s=>{ if(s && s.code) byCode[String(s.code).toUpperCase()]=s; });
-  d.shifts = std.map(s=>({
-    code: s.code,
-    label: (byCode[s.code] && byCode[s.code].label) || s.label,
-    start: (byCode[s.code] && byCode[s.code].start) || s.start,
-    end: (byCode[s.code] && byCode[s.code].end) || s.end
-  }));
-  d.shiftCount = 5;
+  // If saved config only had 2 or 3 codes, mark those active and others inactive
+  const hadAnyActive = (d.shifts||[]).some(s=>s && s.active===true);
+  const savedCodes = new Set(Object.keys(byCode));
+  d.shifts = std.map(s=>{
+    const prev = byCode[s.code];
+    let active = s.active;
+    if(prev){
+      if(prev.active===true || prev.active===false) active = !!prev.active;
+      else if(!hadAnyActive && savedCodes.size) active = savedCodes.has(s.code); // legacy: codes present = active
+    }
+    return {
+      code: s.code,
+      label: (prev && prev.label) || s.label,
+      start: (prev && prev.start) || s.start,
+      end: (prev && prev.end) || s.end,
+      active
+    };
+  });
+  if(d.minMet==null) d.minMet = 5;
+  if(d.minSlit==null) d.minSlit = 3;
+  if(d.minSup==null) d.minSup = 2;
+  d.shiftCount = d.shifts.filter(s=>s.active).length;
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">⚙️ Shift & Machine Settings</div>
   <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">
     ${isAdmin()?'Company: <b style="color:var(--text)">'+(SESSION.viewCompanyId||'').toUpperCase()+'</b>':'आपकी अपनी Team के लिए'}
   </div>
 
-  <div style="font-size:12px;font-weight:800;color:#f97316;margin:4px 0 8px">⏰ Shift Timings (D / N / A / B / C — सभी managers के लिए खुले)</div>
+  <div style="font-size:12px;font-weight:800;color:#f97316;margin:4px 0 6px">⏰ Shifts — Auto Schedule के लिए</div>
   <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.5">
-    सभी shifts schedule में उपलब्ध रहेंगी। यहाँ सिर्फ timing सेट करें — वही timing section के नीचे schedule में दिखेगी।
+    ✅ टिक = <b>Auto बनाएं</b> में ये shifts rotate होंगी (जैसे सिर्फ D+N, या सिर्फ A+B+C)।<br>
+    सभी codes (D/N/A/B/C) schedule पर manually select हो सकते हैं — timing यहाँ से आती है।
   </div>
   <div id="ss_shiftTimings">${_renderShiftTimingRows()}</div>
+
+  <div style="font-size:12px;font-weight:800;color:#38bdf8;margin:16px 0 6px">📉 Minimum Staff (संख्या कम होने पर highlight)</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:8px">दिन की गिनती इस संख्या से कम हो तो summary में लाल/⚠️ दिखेगा।</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+    <div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Metalliser min</div>
+      <input type="number" min="0" max="50" value="${d.minMet}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minMet=Number(this.value)||0">
+    </div>
+    <div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Slitter min</div>
+      <input type="number" min="0" max="50" value="${d.minSlit}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minSlit=Number(this.value)||0">
+    </div>
+    <div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Supervisor min</div>
+      <input type="number" min="0" max="50" value="${d.minSup}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minSup=Number(this.value)||0">
+    </div>
+  </div>
 
   <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
   <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
@@ -3204,12 +3291,17 @@ function _renderShiftSettingsModal(){
 
 function _renderShiftTimingRows(){
   return _shiftDraft.shifts.map((s,i)=>`
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-      <input type="text" value="${s.code}" readonly style="width:42px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;text-align:center;font-weight:900">
-      <input type="text" value="${s.label}" placeholder="नाम" style="flex:1;min-width:70px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].label=this.value">
-      <input type="time" value="${s.start}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].start=this.value">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;padding:8px;border-radius:10px;border:1px solid var(--border);background:${s.active!==false?'rgba(34,197,94,.06)':'var(--card2)'}">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;flex-shrink:0" title="Auto schedule में use करें">
+        <input type="checkbox" ${s.active!==false?'checked':''} style="width:16px;height:16px;accent-color:#22c55e"
+          onchange="_shiftDraft.shifts[${i}].active=this.checked;document.getElementById('ss_shiftTimings').innerHTML=_renderShiftTimingRows()">
+        <span style="width:28px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;font-family:'Barlow Condensed',sans-serif"
+          class="shc ${cellClass(s.code)}">${s.code}</span>
+      </label>
+      <input type="text" value="${s.label}" placeholder="नाम" style="flex:1;min-width:60px;padding:7px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].label=this.value">
+      <input type="time" value="${s.start}" style="padding:7px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].start=this.value">
       <span style="color:#64748b;font-size:11px">to</span>
-      <input type="time" value="${s.end}" style="padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].end=this.value">
+      <input type="time" value="${s.end}" style="padding:7px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px" oninput="_shiftDraft.shifts[${i}].end=this.value">
     </div>`).join('');
 }
 
@@ -3245,6 +3337,12 @@ async function _saveShiftSettings(){
   for(const s of _shiftDraft.shifts){
     if(!s.code||!s.label){ toast('⚠️ सभी Shift की Code और नाम भरें'); return; }
   }
+  const activeCount = (_shiftDraft.shifts||[]).filter(s=>s.active!==false).length;
+  if(activeCount < 1){ toast('⚠️ Auto के लिए कम से कम 1 shift tick करें (D/N या A/B/C)'); return; }
+  _shiftDraft.shiftCount = activeCount;
+  _shiftDraft.minMet = Number(_shiftDraft.minMet)||0;
+  _shiftDraft.minSlit = Number(_shiftDraft.minSlit)||0;
+  _shiftDraft.minSup = Number(_shiftDraft.minSup)||0;
   const ok=await saveShiftConfig(_shiftDraft);
   if(ok){
     closeModal();
@@ -3637,10 +3735,18 @@ function cellClass(s){ if(!s) return 'blank'; const m={'D':'D','N':'N','A':'A','
 function cellDisp(s){  if(!s) return ''; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'½','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||s||''; }
 function getShiftTimingStripHtml(){
   const cfg=getShiftConfigSync();
-  const shifts=(cfg.shifts||[]).filter(s=>s&&s.code&&['D','N','A','B','C'].includes(String(s.code).toUpperCase()));
-  if(!shifts.length) return '';
-  const bits=shifts.map(s=>{
-    const code=String(s.code).toUpperCase();
+  const byCode={};
+  (cfg.shifts||[]).forEach(s=>{ if(s&&s.code) byCode[String(s.code).toUpperCase()]=s; });
+  const order=['D','N','A','B','C'];
+  // Prefer showing only active (Auto) shifts under section; if none flagged, show all configured
+  let codes = order.filter(c=>{
+    const s=byCode[c];
+    return s && s.active!==false;
+  });
+  if(!codes.length) codes = order.filter(c=>byCode[c]);
+  if(!codes.length) codes = getActiveRotationCodes();
+  const bits=codes.map(code=>{
+    const s=byCode[code]||{code,label:code};
     const t=(s.start&&s.end)?`${s.start}–${s.end}`:'';
     return `<span class="shc ${cellClass(code)}" style="width:auto;min-width:22px;height:18px;padding:0 5px;font-size:10px;margin-right:2px">${code}</span><span style="font-size:10px;color:var(--muted2);margin-right:10px">${s.label||code}${t?' · '+t:''}</span>`;
   }).join('');
@@ -5128,7 +5234,7 @@ function renderSchedule(){
 
   // ── Summary rows: one per configured shift + Leave count per date ──
   // Threshold warnings: M-1&2 → min 5, S-1&2 → min 3, Supervisor → min 2, ALL → no threshold
-  const _thresh = schedSec==='M12' ? 5 : schedSec==='S12' ? 3 : schedSec==='SUP' ? 2 : 0;
+  const _thresh = getMinStaffForFilter();
   const summaryStyles = 'font-family:Barlow Condensed,sans-serif;font-weight:900;font-size:13px;text-align:center;padding:4px 2px;';
   const _cfgShiftsForSummary = _discoverAllShiftCodes(allEmps, getShiftConfigSync().shifts||[{code:'D',label:'Day'},{code:'N',label:'Night'}]);
   const _shiftRowColorMap={
@@ -5169,6 +5275,7 @@ function renderSchedule(){
 
   tbody+='</tbody>';
   document.getElementById('schedTbl').innerHTML=thead+tbody;
+  try{ if(typeof _lang!=='undefined'&&_lang==='en'&&typeof _translateDOM==='function') setTimeout(_translateDOM, 50); }catch(e){}
   // Re-render save bar (pending changes may span visible dates)
   _updateSaveBar();
   // Sync horizontal scroll: sticky date header <-> table scroll container
@@ -9721,17 +9828,26 @@ async function viewSecurityLog(){
 function openModal(html){
   document.getElementById('modalBody').innerHTML=`<div class="modal">${html}</div>`;
   document.getElementById('overlay').classList.add('open');
-  // Auto-translate modal-title elements when in English mode
-  if(typeof _lang !== 'undefined' && _lang === 'en' && typeof t === 'function'){
+  // Translate all modal text when English is active
+  if(typeof _lang !== 'undefined' && _lang === 'en'){
     setTimeout(()=>{
       try{
-        document.querySelectorAll('#modalBody .modal-title').forEach(el => {
-          const orig = el.textContent.trim();
-          const translated = t(orig);
-          if(translated !== orig) el.textContent = translated;
+        if(typeof _translateDOM === 'function') _translateDOM();
+        // Also walk button labels / plain text leaves inside modal only
+        document.querySelectorAll('#modalBody button, #modalBody .modal-title, #modalBody label, #modalBody span, #modalBody div').forEach(el=>{
+          if(el.children && el.children.length) return;
+          const orig = (el.textContent||'').trim();
+          if(!orig || typeof t !== 'function') return;
+          const tr = t(orig);
+          if(tr !== orig) el.textContent = tr;
+        });
+        document.querySelectorAll('#modalBody input[placeholder], #modalBody textarea[placeholder]').forEach(el=>{
+          const ph = el.getAttribute('placeholder')||'';
+          const tr = t(ph);
+          if(tr !== ph) el.setAttribute('placeholder', tr);
         });
       }catch(e){}
-    }, 30);
+    }, 40);
   }
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); }
@@ -10190,6 +10306,175 @@ const _i18n_HI_EN = {
   'या कारण लिखें...':                         'Or write reason...',
   'सभी जरूरी details यहाँ लिखें...':          'Write all required details here...',
   '📌 Section का नाम':                        '📌 Section Name',
+  // ── Schedule / Print / Shift settings (UI polish) ──
+  '📋 Schedule बनाएं': '📋 Create Schedule',
+  '🖨️ प्रिंट': '🖨️ Print',
+  '🖨️ Print करें': '🖨️ Print',
+  'Print करें': 'Print',
+  'Print — Section चुनें': 'Print — Choose Sections',
+  'जो sections print करनी हों उन्हें tick करें': 'Tick the sections you want to print',
+  '✅ सभी': '✅ All',
+  '☐ कोई नहीं': '☐ None',
+  'रद्द': 'Cancel',
+  'रद्द करें': 'Cancel',
+  '✕ रद्द करें': '✕ Cancel',
+  '✕ रद्द करें · Cancel': '✕ Cancel',
+  '💾 Save करें': '💾 Save',
+  '✅ Save करें': '✅ Save',
+  '📝 बदलाव pending हैं': '📝 Changes pending',
+  'बदलाव pending हैं': 'Changes pending',
+  'कस्टम तारीख चुनें': 'Pick Custom Date',
+  '🗓️ कस्टम तारीख चुनें': '🗓️ Pick Custom Date',
+  '↕️ क्रम बदलें': '↕️ Reorder',
+  'क्रम बदलें': 'Reorder',
+  'साप्ताहिक छुट्टी': 'Weekly Off',
+  'लीव': 'Leave',
+  'जनरल': 'General',
+  'अवकाश (Leaves)': 'Leaves',
+  '+ नया अवकाश आवेदन': '+ New Leave Application',
+  '⏳ प्रतीक्षा में': '⏳ Pending',
+  '✅ मंजूर': '✅ Approved',
+  '❌ अस्वीकार': '❌ Rejected',
+  'टीम': 'Team',
+  'नाम या कोड से खोजें...': 'Search by name or code...',
+  'जो कर्मचारी टीम छोड़ चुके हैं': 'Employees who have left the team',
+  'ऊपर Month चुनें': 'Select Month above',
+  'मेटलाइज़र विभाग': 'Metalliser Department',
+  'संपर्क करें': 'Contact',
+  'UNLOCK KEY डालें': 'Enter UNLOCK KEY',
+  '🔓 अनलॉक करें': '🔓 Unlock',
+  '📲 App Install करें / Download App': '📲 Install / Download App',
+  'App Install करें': 'Install App',
+  '10 अंकों का Mobile': '10-digit Mobile',
+  'Admin हैं? ': 'Admin? ',
+  'OTP डालें': 'Enter OTP',
+  'OTP भेजा गया': 'OTP sent',
+  'वापस': 'Back',
+  '← वापस': '← Back',
+  '&larr; वापस': '← Back',
+  'आप कौन हैं?': 'Who are you?',
+  'अपनी भूमिका चुनें': 'Choose your role',
+  'मैं एक Manager हूं — अपनी team बनाना चाहता/चाहती हूं': 'I am a Manager — I want to create my team',
+  'मैं एक Member हूं — अपने Manager की team में शामिल हूं': 'I am a Member — I belong to my Manager’s team',
+  'VKS Tech Admin verify करेगा': 'VKS Tech Admin will verify',
+  'पूरा नाम *': 'Full Name *',
+  'आपका नाम': 'Your name',
+  'Company का नाम *': 'Company Name *',
+  'जैसे: ABC Industries': 'e.g. ABC Industries',
+  '-- चुनें --': '-- Select --',
+  'Shift चुनें': 'Select Shift',
+  '✏️ Shift चुनें': '✏️ Select Shift',
+  'वर्तमान:': 'Current:',
+  '⚙️ Shift & Machine Settings': '⚙️ Shift & Machine Settings',
+  '⏰ Shifts — Auto Schedule के लिए': '⏰ Shifts — for Auto Schedule',
+  '✅ टिक = Auto बनाएं में ये shifts rotate होंगी (जैसे सिर्फ D+N, या सिर्फ A+B+C)।': '✅ Tick = these shifts will rotate in Auto Generate (e.g. only D+N, or only A+B+C).',
+  'सभी codes (D/N/A/B/C) schedule पर manually select हो सकते हैं — timing यहाँ से आती है।': 'All codes (D/N/A/B/C) can still be selected manually on the schedule — timings come from here.',
+  '📉 Minimum Staff (संख्या कम होने पर highlight)': '📉 Minimum Staff (highlight when count is low)',
+  'दिन की गिनती इस संख्या से कम हो तो summary में लाल/⚠️ दिखेगा।': 'If the day count is below this number, the summary shows red / ⚠️.',
+  'Metalliser min': 'Metalliser min',
+  'Slitter min': 'Slitter min',
+  'Supervisor min': 'Supervisor min',
+  '🏭 Metalliser Machines': '🏭 Metalliser Machines',
+  '✂️ Slitter Machines': '✂️ Slitter Machines',
+  '+ Metalliser जोड़ें': '+ Add Metalliser',
+  '+ SLitter जोड़ें': '+ Add Slitter',
+  '+ Slitter जोड़ें': '+ Add Slitter',
+  '🤖 Auto बनाएं': '🤖 Auto Generate',
+  '← बदलें': '← Change',
+  'बदलें': 'Change',
+  'Drag करके Cells चुनें · Double-tap करके Copy/Select करें': 'Drag to select cells · Double-tap to Copy/Select',
+  'Cell tap करें: D → N → O → L → G → CO → ½ → Ab → साफ': 'Cell tap: D → N → O → L → G → CO → ½ → Ab → clear',
+  'कर्मचारी': 'Employee',
+  'छुट्टी': 'Off',
+  'Save करें।': 'Save.',
+  '✅ Shift Settings save हो गईं': '✅ Shift Settings saved',
+  '⚠️ कम से कम एक Machine जोड़ें': '⚠️ Add at least one Machine',
+  '⚠️ सभी Shift की Code और नाम भरें': '⚠️ Fill code and name for all shifts',
+  '⚠️ Auto के लिए कम से कम 1 shift tick करें (D/N या A/B/C)': '⚠️ Tick at least 1 shift for Auto (D/N or A/B/C)',
+  '❌ कम से कम एक section चुनें': '❌ Select at least one section',
+  '❌ Print library load नहीं हुई — page refresh करके फिर try करें': '❌ Print library failed to load — refresh the page and try again',
+  '📸 Image बन रही है... रुकिए': '📸 Creating image… please wait',
+  '✅ Schedule image download हो गई!': '✅ Schedule image downloaded!',
+  'Company select करें पहले': 'Select a Company first',
+  '❌ Company select करें पहले': '❌ Select a Company first',
+  '⚠️ पहले header से एक Company चुनें': '⚠️ Select a Company from the header first',
+  'आपकी अपनी Team के लिए': 'For your own team',
+  '⏳ Loading...': '⏳ Loading...',
+  'नया PASSWORD (कम से कम 5 अंक) *': 'New PASSWORD (min 5 characters) *',
+  'Password कम से कम 5 characters होना चाहिए': 'Password must be at least 5 characters',
+  '❌ Password कम से कम 5 characters होना चाहिए': '❌ Password must be at least 5 characters',
+  'क्रम & Group save हो गया! Schedule update हो रही है...': 'Order & group saved! Updating schedule…',
+  '✅ क्रम & Group save हो गया! Schedule update हो रही है...': '✅ Order & group saved! Updating schedule…',
+  '🔄 Default order restore हो गया': '🔄 Default order restored',
+  'Custom order और role assignments हट जाएंगे।': 'Custom order and role assignments will be removed.',
+  'यह action undo नहीं होगी।': 'This action cannot be undone.',
+  '🔄 हाँ, Reset करें': '🔄 Yes, Reset',
+  'कर्मचारी क्रम व Group बदलें': 'Reorder employees & change groups',
+  '▲▼ से क्रम बदलें • Dropdown से Group बदलें • फिर Save करें': 'Use ▲▼ to reorder · Dropdown to change group · then Save',
+  'MANAGERS & उनकी TEAMS (Mobile Registration)': 'MANAGERS & THEIR TEAMS (Mobile Registration)',
+  'कर्मचारी (Employee Code System)': 'Employees (Employee Code System)',
+  'सीखें': 'Learn',
+  'सीखें — Learn Now': 'Learn Now',
+  'Learn & Grow': 'Learn & Grow',
+  'दिन शिफ्ट': 'Day Shift',
+  'रात शिफ्ट': 'Night Shift',
+  'A Shift': 'A Shift',
+  'B Shift': 'B Shift',
+  'C Shift': 'C Shift',
+  'Day Shift': 'Day Shift',
+  'Night Shift': 'Night Shift',
+  'साप्ताहिक छुट्टी:': 'Weekly Off:',
+  'मशीन:': 'Machine:',
+  'बाद में': 'Later',
+  'बंद करें': 'Close',
+  'Close': 'Close',
+  'Koi tampering log nahi — sab safe hai': 'No tampering log — all safe',
+  '✅ Koi tampering log nahi — sab safe hai': '✅ No tampering log — all safe',
+  'डेटा initialize हो गया': 'Data initialized',
+  '✅ डेटा initialize हो गया': '✅ Data initialized',
+  '🌐 सभी Companies दिख रही हैं': '🌐 Showing all companies',
+  '🏢 अब सिर्फ इस Company का data दिख रहा है': '🏢 Showing data for this company only',
+  '⚠️ पहले Schedule खोलें': '⚠️ Open the Schedule first',
+  '✅ ${generated} कर्मचारियों की Schedule auto-generate हो गई!': '✅ Auto-generated schedule for ${generated} employees!',
+  'approved leave दिन सुरक्षित रहे': 'approved leave days protected',
+  'Save करें': 'Save',
+  'नाम': 'Name',
+  'कोड': 'Code',
+  'to': 'to',
+  'अवर्गीकृत': 'Unassigned',
+  'Met (सभी Metalliser)': 'Met (All Metalliser)',
+  'Slit (सभी Slitter)': 'Slit (All Slitter)',
+  'NCR रिपोर्ट': 'NCR Report',
+  'अनुपस्थिति': 'Absence',
+  'चेतावनी / अनुशासनहीनता': 'Warning / Indiscipline',
+  'प्रशंसा': 'Appreciation',
+  'Imp. Information': 'Imp. Information',
+  'सुपरवाइज़र': 'Supervisor',
+  'मैनेजर': 'Manager',
+  'मेटलाइज़र-1': 'Metalliser-1',
+  'मेटलाइज़र-2': 'Metalliser-2',
+  'स्लिटर-1': 'Slitter-1',
+  'स्लिटर-2': 'Slitter-2',
+  'दिन (7AM-7PM)': 'Day (7AM-7PM)',
+  'रात (7PM-7AM)': 'Night (7PM-7AM)',
+  'Current View (screen filter)': 'Current View (screen filter)',
+  '📋 Current View (screen filter)': '📋 Current View (screen filter)',
+  '📋 CURRENT VIEW': '📋 CURRENT VIEW',
+  '📋 ALL EMPLOYEES': '📋 ALL EMPLOYEES',
+  'All Employees': 'All Employees',
+  '📋 All Employees': '📋 All Employees',
+  'Shift Trends': 'Shift Trends',
+  'SHIFT TRENDS': 'SHIFT TRENDS',
+  'Live Sync · Last Update:': 'Live Sync · Last Update:',
+  'Pick Custom Date': 'Pick Custom Date',
+  'Pending': 'Pending',
+  'To-Do': 'To-Do',
+  'Reports': 'Reports',
+  'Home': 'Home',
+  'Schedule': 'Schedule',
+  'Leave': 'Leave',
+  'Team': 'Team',
+
 };
 
 /**
@@ -11628,9 +11913,9 @@ function autoGenSchedule(monthKey){
     // Find last shift before month to determine starting shift, AND count off-days
     // between that shift and the target month — for each off encountered,
     // the rotation advances to the next shift in rotationOrder.
-    const configShiftCodes = (getShiftConfigSync().shifts||[{code:'D'},{code:'N'}]).map(s=>s.code);
-    // Rotation sequence: for exactly 3 shifts, rotate as 1st → 3rd → 2nd → 1st (e.g. A→C→B→A).
-    // For any other shift count, rotate in natural configured order.
+    // Only shifts marked active in Profile → Shift Settings (D+N or A+B+C etc.)
+    const configShiftCodes = getActiveRotationCodes();
+    // 3-shift: rotate 1st → 3rd → 2nd (e.g. A→C→B→A). 2-shift: natural D→N→D.
     const rotationOrder = configShiftCodes.length===3
       ? [configShiftCodes[0], configShiftCodes[2], configShiftCodes[1]]
       : configShiftCodes;
@@ -11805,27 +12090,40 @@ async function saveScheduleBuilder(monthKey){
 // openPrintModal → user picks sections → _execPrint()
 // ─────────────────────────────────────────────────────────
 function printSched(){
-  // Define all available print groups
+  // Broader filters (match schedule DISPLAY_ORDER so groups are never empty when staff exists)
   const PRINT_GROUPS = [
-    { id:'met_main',  label:'⭐ Metalliser — Main Operators', checked:true,  filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='main' },
-    { id:'met_rel',   label:'🔄 Metalliser — Relievers',      checked:true,  filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='reliever' },
-    { id:'met_asst',  label:'🏭 Metalliser — Team',           checked:true,  filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='assist' },
-    { id:'slit_main', label:'⭐ Slitter — Main Operators',    checked:true,  filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
-    { id:'slit_rel',  label:'🔄 Slitter — Relievers',         checked:true,  filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
-    { id:'slit_asst', label:'✂️ Slitter — Team',              checked:true,  filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { id:'sup',       label:'👷 Supervisors',                  checked:true,  filter:e=>e.sec==='SUP' },
-    { id:'mgr',       label:'🎯 Manager',                      checked:false, filter:e=>e.sec==='MGR' },
+    { id:'met_main',  label:'⭐ Metalliser — Main Operators', checked:true,
+      filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='main' },
+    { id:'met_rel',   label:'🔄 Metalliser — Relievers',      checked:true,
+      filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='reliever' },
+    { id:'met_asst',  label:'🏭 Metalliser — Team',           checked:true,
+      filter:e=>['M1','M2'].includes(e.sec)&&!['main','reliever'].includes(getEmpRole(e).role) },
+    { id:'slit_main', label:'⭐ Slitter — Main Operators',    checked:true,
+      filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
+    { id:'slit_rel',  label:'🔄 Slitter — Relievers',         checked:true,
+      filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
+    { id:'slit_asst', label:'✂️ Slitter — Team',              checked:true,
+      filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
+    { id:'sup',       label:'👷 Supervisors',                  checked:true,
+      filter:e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; } },
+    { id:'mgr',       label:'🎯 Manager',                      checked:false,
+      filter:e=>{ const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
+    { id:'current',   label:'📋 Current View (screen filter)', checked:true,
+      filter:e=>getSchedFilteredEmps().some(x=>x.id===e.id) },
   ];
 
-  // Filter out empty groups
   const allEmps = getEmps().filter(e=>e.status!=='resigned');
-  const activeGroups = PRINT_GROUPS.filter(g => allEmps.some(g.filter));
+  let activeGroups = PRINT_GROUPS.filter(g => allEmps.some(g.filter));
+  // Safety: never show an empty modal — always allow "current view" + all
+  if(!activeGroups.length){
+    activeGroups = [{ id:'all', label:'📋 All Employees', checked:true, filter:e=>true }];
+  }
 
   const rowsHtml = activeGroups.map(g=>`
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;
-      background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer">
-      <input type="checkbox" id="prtchk_${g.id}" ${g.checked?'checked':''} 
-        style="width:18px;height:18px;accent-color:var(--m1);cursor:pointer;flex-shrink:0">
+      background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:4px">
+      <input type="checkbox" class="prtchk" id="prtchk_${g.id}" data-prtid="${g.id}" ${g.checked?'checked':''}
+        style="width:18px;height:18px;accent-color:#0ea5e9;cursor:pointer;flex-shrink:0">
       <span style="font-size:13px;font-weight:700;color:var(--text)">${g.label}</span>
     </label>`).join('');
 
@@ -11838,19 +12136,19 @@ function printSched(){
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button onclick="document.querySelectorAll('[id^=prtchk_]').forEach(c=>c.checked=true)"
-        style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card2);color:var(--muted2);font-size:12px;font-weight:700;cursor:pointer">✅ सभी</button>
-      <button onclick="document.querySelectorAll('[id^=prtchk_]').forEach(c=>c.checked=false)"
+      <button type="button" onclick="document.querySelectorAll('.prtchk').forEach(c=>c.checked=true)"
+        style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card2);color:var(--text);font-size:12px;font-weight:700;cursor:pointer">✅ सभी</button>
+      <button type="button" onclick="document.querySelectorAll('.prtchk').forEach(c=>c.checked=false)"
         style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card2);color:var(--muted2);font-size:12px;font-weight:700;cursor:pointer">☐ कोई नहीं</button>
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;padding-right:2px">
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:45vh;overflow-y:auto;padding-right:2px">
       ${rowsHtml}
     </div>
     <div style="display:flex;gap:8px;margin-top:14px">
-      <button onclick="_execPrint()" style="flex:1;padding:14px;border-radius:12px;border:none;
+      <button type="button" onclick="_execPrint()" style="flex:1;padding:14px;border-radius:12px;border:none;
         background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;
         font-family:'Noto Sans Devanagari',sans-serif;font-size:15px;font-weight:800;cursor:pointer">🖨️ Print करें</button>
-      <button onclick="closeModal()" style="padding:12px 16px;border-radius:12px;
+      <button type="button" onclick="closeModal()" style="padding:12px 16px;border-radius:12px;
         border:1px solid var(--border2);background:var(--card);color:var(--muted2);
         font-family:'Noto Sans Devanagari',sans-serif;font-size:13px;font-weight:700;cursor:pointer">रद्द</button>
     </div>`);
@@ -11858,26 +12156,36 @@ function printSched(){
 
 async function _execPrint(){
   // Gather selected group ids BEFORE closing modal (DOM still present)
-  const selectedIds = [...document.querySelectorAll('[id^=prtchk_]')]
-    .filter(c=>c.checked).map(c=>c.id.replace('prtchk_',''));
-  if(!selectedIds.length){ toast('❌ कम से कम एक section चुनें'); return; }
+  let selectedIds = [...document.querySelectorAll('.prtchk, [id^=prtchk_]')]
+    .filter(c=>c.checked)
+    .map(c=>c.dataset.prtid || c.id.replace('prtchk_',''));
+  // Fallback: if UI had no checkboxes or none checked, print current on-screen filter
+  if(!selectedIds.length){
+    selectedIds = ['current'];
+  }
   if(typeof html2canvas !== 'function'){
     toast('❌ Print library load नहीं हुई — page refresh करके फिर try करें');
     return;
   }
   closeModal();
 
-  // Redefine groups with filters
-  const PRINT_GROUPS = [
+  // Redefine groups with filters (same broad rules as printSched)
+  const ALL_PRINT_GROUPS = [
     { id:'met_main',  label:'⭐ METALLISER — MAIN OPERATORS', color:'#f97316', filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='main' },
     { id:'met_rel',   label:'🔄 METALLISER — RELIEVERS',      color:'#fb923c', filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='reliever' },
-    { id:'met_asst',  label:'🏭 METALLISER — TEAM',           color:'#d97706', filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='assist' },
+    { id:'met_asst',  label:'🏭 METALLISER — TEAM',           color:'#d97706', filter:e=>['M1','M2'].includes(e.sec)&&!['main','reliever'].includes(getEmpRole(e).role) },
     { id:'slit_main', label:'⭐ SLITTER — MAIN OPERATORS',    color:'#0284c7', filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
     { id:'slit_rel',  label:'🔄 SLITTER — RELIEVERS',         color:'#0ea5e9', filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
     { id:'slit_asst', label:'✂️ SLITTER — TEAM',              color:'#38bdf8', filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { id:'sup',       label:'👷 SUPERVISORS',                  color:'#7c3aed', filter:e=>e.sec==='SUP' },
-    { id:'mgr',       label:'🎯 MANAGER',                      color:'#a21caf', filter:e=>e.sec==='MGR' },
-  ].filter(g=>selectedIds.includes(g.id));
+    { id:'sup',       label:'👷 SUPERVISORS',                  color:'#7c3aed', filter:e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; } },
+    { id:'mgr',       label:'🎯 MANAGER',                      color:'#a21caf', filter:e=>{ const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
+    { id:'current',   label:'📋 CURRENT VIEW',                 color:'#0ea5e9', filter:e=>getSchedFilteredEmps().some(x=>x.id===e.id) },
+    { id:'all',       label:'📋 ALL EMPLOYEES',                color:'#64748b', filter:e=>true },
+  ];
+  let PRINT_GROUPS = ALL_PRINT_GROUPS.filter(g=>selectedIds.includes(g.id));
+  if(!PRINT_GROUPS.length){
+    PRINT_GROUPS = [ALL_PRINT_GROUPS.find(g=>g.id==='current')];
+  }
 
   // Date range
   let dates;
