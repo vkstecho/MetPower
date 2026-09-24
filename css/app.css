@@ -906,15 +906,27 @@ body.light .trends-tbl th:first-child{background:var(--card2);}
 /* ══ ADMIN OVERFLOW MENU ══ */
 .sched-admin-row{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;}
 .sched-admin-btn{
-  flex:0 1 auto;min-width:fit-content;padding:10px 12px;border:1px solid var(--border2);
-  border-radius:10px;background:var(--panel);color:var(--text);
-  font-family:'Noto Sans Devanagari',sans-serif;font-size:12px;font-weight:700;
+  flex:0 1 auto;min-width:fit-content;padding:10px 12px;border:1.5px solid rgba(148,163,184,.4);
+  border-radius:10px;background:rgba(30,41,59,.95);color:#f1f5f9;
+  font-family:'Noto Sans Devanagari',sans-serif;font-size:12px;font-weight:800;
   cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;
   transition:background .15s,border-color .15s;white-space:nowrap;
 }
-.sched-admin-btn:active{background:var(--card2);border-color:var(--muted);}
-.sched-admin-btn.green{border-color:rgba(34,197,94,.3);color:var(--green);background:rgba(34,197,94,.06);}
-.sched-admin-btn.blue{border-color:rgba(96,165,250,.3);color:var(--s2);background:rgba(96,165,250,.06);}
+.sched-admin-btn:active{background:#1e293b;border-color:#94a3b8;}
+.sched-admin-btn.green{border-color:#16a34a;color:#bbf7d0;background:rgba(22,163,74,.18);}
+.sched-admin-btn.blue{border-color:#0284c7;color:#bae6fd;background:rgba(2,132,199,.18);}
+body.light .sched-admin-btn{
+  background:#fff;color:#0f172a;border-color:#94a3b8;
+}
+body.light .sched-admin-btn.green{background:#ecfdf5;color:#166534;border-color:#16a34a;}
+body.light .sched-admin-btn.blue{background:#eff6ff;color:#1d4ed8;border-color:#3b82f6;}
+body.light .chip{
+  background:#f1f5f9;color:#0f172a;border:1.5px solid #94a3b8;
+}
+body.light .chip.on{
+  background:#ea580c;color:#fff !important;border-color:#c2410c;
+  box-shadow:0 2px 12px rgba(234,88,12,.4);
+}
 
 /* ══ PROFILE SETTINGS ROW ══ */
 .profile-action{
@@ -1809,3 +1821,223 @@ body.light .learn-hero{ background:linear-gradient(160deg,#1a0533,#0d1623,#080e1
   .profile-action .pa-label { font-size: 15px !important; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   HIGH CONTRAST REFINEMENTS (light + dark)
+   ═══════════════════════════════════════════════════════════ */
+
+/* Sidebar nav items — stronger labels */
+.side-item, .sidebar a, .sidebar button, [class*="side"] .nav-link {
+  color: var(--text) !important;
+  font-weight: 700 !important;
+}
+body.light .side-item,
+body.light .sidebar a,
+body.light .sidebar button {
+  color: #0f172a !important;
+}
+
+/* Bottom / side nav buttons */
+.nb {
+  color: var(--muted2) !important;
+  font-weight: 800 !important;
+}
+.nb.on {
+  color: #ea580c !important;
+  font-weight: 900 !important;
+}
+body.light .nb {
+  color: #334155 !important;
+}
+body.light .nb.on {
+  color: #c2410c !important;
+}
+
+/* Filter chips — always high contrast */
+.chip {
+  border: 1.5px solid rgba(148,163,184,.55) !important;
+  background: rgba(15,23,42,.92) !important;
+  color: #f8fafc !important;
+  font-weight: 800 !important;
+}
+.chip.on {
+  background: #ea580c !important;
+  border-color: #c2410c !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 12px rgba(234,88,12,.45) !important;
+}
+body.light .chip {
+  background: #ffffff !important;
+  border: 1.5px solid #64748b !important;
+  color: #0f172a !important;
+}
+body.light .chip.on {
+  background: #ea580c !important;
+  border-color: #9a3412 !important;
+  color: #ffffff !important;
+}
+
+/* Schedule admin action buttons */
+.sched-admin-btn {
+  border: 1.5px solid #64748b !important;
+  background: #1e293b !important;
+  color: #f8fafc !important;
+  font-weight: 800 !important;
+}
+.sched-admin-btn.green {
+  background: #14532d !important;
+  border-color: #16a34a !important;
+  color: #bbf7d0 !important;
+}
+.sched-admin-btn.blue {
+  background: #0c4a6e !important;
+  border-color: #0284c7 !important;
+  color: #e0f2fe !important;
+}
+body.light .sched-admin-btn {
+  background: #ffffff !important;
+  border-color: #475569 !important;
+  color: #0f172a !important;
+}
+body.light .sched-admin-btn.green {
+  background: #dcfce7 !important;
+  border-color: #15803d !important;
+  color: #14532d !important;
+}
+body.light .sched-admin-btn.blue {
+  background: #e0f2fe !important;
+  border-color: #0369a1 !important;
+  color: #0c4a6e !important;
+}
+
+/* Primary / secondary actions */
+.action-primary, .big-btn, .submit-btn {
+  font-weight: 900 !important;
+  letter-spacing: .2px;
+}
+body.light .action-primary,
+body.light .big-btn,
+body.light .submit-btn {
+  color: #fff !important;
+}
+
+/* Legend under schedule */
+.leg {
+  color: var(--text) !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+}
+body.light .leg {
+  color: #0f172a !important;
+}
+
+/* Section header rows */
+.sec-row td,
+.sched-tbl tr.sec-row td {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  font-weight: 900 !important;
+  border-bottom: 2px solid #334155 !important;
+}
+body.light .sec-row td,
+body.light .sched-tbl tr.sec-row td {
+  background: #1e293b !important;
+  color: #ffffff !important;
+}
+
+/* Employee name column — crisp white on dark */
+.sched-tbl td.ecol .emp-nm {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 800 !important;
+  font-size: 13px !important;
+}
+.sched-tbl td.ecol .emp-id {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+  font-weight: 600 !important;
+}
+body.light .sched-tbl td.ecol {
+  background: #0f172a !important;
+}
+body.light .sched-tbl td.ecol .emp-nm {
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+}
+
+/* Shift badges — slightly larger, pure colors */
+.shc {
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  border: 1px solid rgba(0,0,0,.15);
+}
+.shc.D { background: #f59e0b !important; color: #000 !important; }
+.shc.N { background: #4338ca !important; color: #fff !important; }
+.shc.A { background: #15803d !important; color: #fff !important; }
+.shc.B { background: #be185d !important; color: #fff !important; }
+.shc.C { background: #0e7490 !important; color: #fff !important; }
+.shc.O { background: #334155 !important; color: #e2e8f0 !important; }
+.shc.L { background: #be123c !important; color: #fff !important; }
+.shc.G { background: #0369a1 !important; color: #fff !important; }
+
+/* Summary count rows — clearer numbers */
+.sched-tbl td.ecol {
+  font-weight: 800;
+}
+body.light .sched-tbl tbody tr td:not(.ecol) {
+  color: #0f172a;
+}
+
+/* Page titles & muted labels */
+.page-title, .modal-title, .stitle {
+  color: var(--text) !important;
+  font-weight: 900 !important;
+}
+body.light .page-title,
+body.light .modal-title,
+body.light .stitle {
+  color: #0f172a !important;
+}
+
+/* Inputs / placeholders */
+body.light input,
+body.light textarea,
+body.light select {
+  color: #0f172a !important;
+  border-color: #64748b !important;
+}
+body.light input::placeholder,
+body.light textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+/* Team / leave cards */
+body.light .card,
+body.light .todo-card,
+body.light .leave-card {
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(15,23,42,.06) !important;
+}
+
+/* Live sync bar */
+body.light [style*="Live Sync"],
+body.light .live-sync {
+  color: #166534 !important;
+}
+
+/* Date header sticky */
+body.light #schedDateHdr > div {
+  color: #0f172a !important;
+}
+body.light .sched-lbl {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+/* Toast readable */
+.toast {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border: 1px solid #334155 !important;
+  font-weight: 700 !important;
+}

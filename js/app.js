@@ -223,7 +223,7 @@ async function openEmpReorderPanel(){
       filter: e => ['S1','S2'].includes(e.sec) && getEmpRole(e).role==='slit_rel' },
     { key:'slit_asst', label:'✂️ Slitter — Team',              color:'#bae6fd',
       filter: e => ['S1','S2'].includes(e.sec) && !['main','slit_rel'].includes(getEmpRole(e).role) },
-    { key:'sup',       label:'👷 Supervisors',                  color:'#a78bfa',
+    { key:'sup',       label:'👷 Supervisors / Engineers',                  color:'#a78bfa',
       filter: e => e.sec==='SUP' },
     { key:'mgr',       label:'🎯 Manager',                      color:'#e879f9',
       filter: e => { const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
@@ -874,9 +874,11 @@ function _defaultShiftConfig(){
       {code:'C', label:'C Shift', start:'22:00', end:'06:00', active:false}
     ],
     // Minimum headcount per day — below this, summary cells highlight red
+    minAll: 4,
     minMet: 5,
     minSlit: 3,
     minSup: 2,
+    minBySec: {},
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
     updatedAt: null
@@ -893,18 +895,38 @@ function getActiveRotationCodes(){
 }
 function getMinStaffForFilter(){
   const cfg = getShiftConfigSync();
-  const minMet = Number(cfg.minMet); const minSlit = Number(cfg.minSlit); const minSup = Number(cfg.minSup);
-  if(schedSec==='M12' || schedSec==='GRP:metalliser' || (schedSec&&String(schedSec).startsWith('M')))
-    return isFinite(minMet)&&minMet>0 ? minMet : 5;
-  if(schedSec==='S12' || schedSec==='GRP:slitter' || (schedSec&&String(schedSec).startsWith('S')))
-    return isFinite(minSlit)&&minSlit>0 ? minSlit : 3;
-  if(schedSec==='SUP' || schedSec==='GRP:supervisor')
-    return isFinite(minSup)&&minSup>0 ? minSup : 2;
-  // Single machine chips M1/M2/S1/S2
-  if(['M1','M2'].includes(schedSec)) return isFinite(minMet)&&minMet>0 ? minMet : 5;
-  if(['S1','S2'].includes(schedSec)) return isFinite(minSlit)&&minSlit>0 ? minSlit : 3;
-  return 0; // ALL — no threshold
+  const n = (v, fallback) => {
+    const x = Number(v);
+    return (isFinite(x) && x >= 0) ? x : fallback;
+  };
+  const minAll  = n(cfg.minAll, 4);
+  const minMet  = n(cfg.minMet, 5);
+  const minSlit = n(cfg.minSlit, 3);
+  const minSup  = n(cfg.minSup, 2);
+  const bySec   = (cfg.minBySec && typeof cfg.minBySec === 'object') ? cfg.minBySec : {};
+  const s = String(schedSec || 'ALL');
+  const key = (typeof _normSecKey === 'function') ? _normSecKey(s) : String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+
+  // Per-machine / per-section override from Profile
+  if(bySec[s] != null && isFinite(Number(bySec[s]))) return Math.max(0, Number(bySec[s]));
+  if(key && bySec[key] != null && isFinite(Number(bySec[key]))) return Math.max(0, Number(bySec[key]));
+
+  if(s === 'ALL') return minAll;
+  if(s === 'M12' || s === 'GRP:metalliser' || key === 'MET') return minMet;
+  if(s === 'S12' || s === 'GRP:slitter' || key === 'SLIT') return minSlit;
+  if(s === 'SUP' || s === 'GRP:supervisor' || key === 'SUP') return minSup;
+  if(s === 'MGR' || s === 'GRP:manager' || key === 'MGR' || key === 'MANAGER') return 0;
+
+  try{
+    const metKeys = new Set((cfg.metallisers||[]).map(x => typeof _normSecKey==='function' ? _normSecKey(x) : String(x).toUpperCase()));
+    const slitKeys = new Set((cfg.slitters||[]).map(x => typeof _normSecKey==='function' ? _normSecKey(x) : String(x).toUpperCase()));
+    if(metKeys.has(key) || key==='M1' || key==='M2') return minMet;
+    if(slitKeys.has(key) || key==='S1' || key==='S2') return minSlit;
+  }catch(e){}
+
+  return minAll;
 }
+
 function getShiftConfigSync(){
   const key=myShiftConfigKey();
   if(key && _shiftConfigCache[key]) return _shiftConfigCache[key];
@@ -961,7 +983,7 @@ function _buildMachineChips(kind){
   if(slitPoolSecs.length || slitMachineSecs.length) chips.push({code:'GRP:slitter',label:secName('SLIT')||(_lang==='en'?'Slit (All Slitter)':'Slit (सभी Slitter)')});
   slitMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
   otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  if(supSecs.length) chips.push({code:'GRP:supervisor',label:secName('SUP')||'Supervisor'});
+  if(supSecs.length) chips.push({code:'GRP:supervisor',label:secName('SUP')||(_lang==='en'?'Supervisor / Engineer':'सुपरवाइज़र / Engineer')});
   if(mgrSecs.length) chips.push({code:'GRP:manager',label:_lang==='en'?'Manager':'Manager'});
   return chips;
 }
@@ -3239,9 +3261,14 @@ function _renderShiftSettingsModal(){
       active
     };
   });
+  if(d.minAll==null) d.minAll = 4;
   if(d.minMet==null) d.minMet = 5;
   if(d.minSlit==null) d.minSlit = 3;
   if(d.minSup==null) d.minSup = 2;
+  if(!d.minBySec || typeof d.minBySec !== 'object') d.minBySec = {};
+  // Ensure each machine has an entry (default from group min)
+  (d.metallisers||[]).forEach(m=>{ if(d.minBySec[m]==null) d.minBySec[m]=d.minMet; });
+  (d.slitters||[]).forEach(m=>{ if(d.minBySec[m]==null) d.minBySec[m]=d.minSlit; });
   d.shiftCount = d.shifts.filter(s=>s.active).length;
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">⚙️ Shift & Machine Settings</div>
@@ -3256,22 +3283,31 @@ function _renderShiftSettingsModal(){
   </div>
   <div id="ss_shiftTimings">${_renderShiftTimingRows()}</div>
 
-  <div style="font-size:12px;font-weight:800;color:#38bdf8;margin:16px 0 6px">📉 Minimum Staff (संख्या कम होने पर highlight)</div>
-  <div style="font-size:11px;color:#64748b;margin-bottom:8px">दिन की गिनती इस संख्या से कम हो तो summary में लाल/⚠️ दिखेगा।</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+  <div style="font-size:12px;font-weight:800;color:#38bdf8;margin:16px 0 6px">📉 Minimum Staff (all sections)</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.5">
+    If the day count is <b>below</b> this number, the summary shows red / ⚠️.<br>
+    Set a value for <b>every section</b> you use — All, groups, and each machine.
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
     <div>
-      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Metalliser min</div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">All sections</div>
+      <input type="number" min="0" max="50" value="${d.minAll!=null?d.minAll:4}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minAll=Number(this.value)||0">
+    </div>
+    <div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Met (All Metalliser)</div>
       <input type="number" min="0" max="50" value="${d.minMet}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minMet=Number(this.value)||0">
     </div>
     <div>
-      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Slitter min</div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Slit (All Slitter)</div>
       <input type="number" min="0" max="50" value="${d.minSlit}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minSlit=Number(this.value)||0">
     </div>
     <div>
-      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Supervisor min</div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">Supervisor</div>
       <input type="number" min="0" max="50" value="${d.minSup}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center" oninput="_shiftDraft.minSup=Number(this.value)||0">
     </div>
   </div>
+  <div style="font-size:11px;font-weight:800;color:#94a3b8;margin:4px 0 6px">Per machine / section</div>
+  <div id="ss_minBySec" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">${_renderMinBySecRows()}</div>
 
   <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
   <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
@@ -3305,6 +3341,25 @@ function _renderShiftTimingRows(){
     </div>`).join('');
 }
 
+function _renderMinBySecRows(){
+  if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
+  const machines = [...(_shiftDraft.metallisers||[]), ...(_shiftDraft.slitters||[])];
+  // unique preserve order
+  const seen = new Set();
+  const list = [];
+  machines.forEach(m=>{ const k=String(m||'').trim(); if(k && !seen.has(k)){ seen.add(k); list.push(k); } });
+  if(!list.length){
+    return `<div style="grid-column:1/-1;font-size:11px;color:#94a3b8">Add machines below — min fields will appear here.</div>`;
+  }
+  return list.map(m=>{
+    const val = (_shiftDraft.minBySec[m]!=null) ? _shiftDraft.minBySec[m] : 0;
+    return `<div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">${m}</div>
+      <input type="number" min="0" max="50" value="${val}" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:800;text-align:center"
+        oninput="if(!_shiftDraft.minBySec)_shiftDraft.minBySec={};_shiftDraft.minBySec['${m.replace(/'/g,"\'")}']=Number(this.value)||0">
+    </div>`;
+  }).join('');
+}
 function _renderMachineRows(field){
   return _shiftDraft[field].map((m,i)=>`
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
@@ -3322,12 +3377,23 @@ function _onShiftCountChange(val){
 
 function _addMachine(field){
   const prefix=field==='metallisers'?'Metalliser-':'Slitter-';
-  _shiftDraft[field].push(prefix+(_shiftDraft[field].length+1));
+  const name = prefix+(_shiftDraft[field].length+1);
+  _shiftDraft[field].push(name);
+  if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
+  if(_shiftDraft.minBySec[name]==null){
+    _shiftDraft.minBySec[name] = field==='metallisers' ? (Number(_shiftDraft.minMet)||0) : (Number(_shiftDraft.minSlit)||0);
+  }
   document.getElementById('ss_'+field).innerHTML=_renderMachineRows(field);
+  const minEl = document.getElementById('ss_minBySec');
+  if(minEl) minEl.innerHTML = _renderMinBySecRows();
 }
 function _removeMachine(field,idx){
+  const removed = _shiftDraft[field][idx];
   _shiftDraft[field].splice(idx,1);
+  if(removed && _shiftDraft.minBySec) delete _shiftDraft.minBySec[removed];
   document.getElementById('ss_'+field).innerHTML=_renderMachineRows(field);
+  const minEl = document.getElementById('ss_minBySec');
+  if(minEl) minEl.innerHTML = _renderMinBySecRows();
 }
 
 async function _saveShiftSettings(){
@@ -3340,9 +3406,11 @@ async function _saveShiftSettings(){
   const activeCount = (_shiftDraft.shifts||[]).filter(s=>s.active!==false).length;
   if(activeCount < 1){ toast('⚠️ Auto के लिए कम से कम 1 shift tick करें (D/N या A/B/C)'); return; }
   _shiftDraft.shiftCount = activeCount;
+  _shiftDraft.minAll = Number(_shiftDraft.minAll)||0;
   _shiftDraft.minMet = Number(_shiftDraft.minMet)||0;
   _shiftDraft.minSlit = Number(_shiftDraft.minSlit)||0;
   _shiftDraft.minSup = Number(_shiftDraft.minSup)||0;
+  if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
   const ok=await saveShiftConfig(_shiftDraft);
   if(ok){
     closeModal();
@@ -5193,7 +5261,7 @@ function renderSchedule(){
   DISPLAY_ORDER.forEach(group=>{
     const members = allEmps.filter(group.filter).sort(group.sort);
     if(!members.length) return;
-    tbody+=`<tr class="sec-row"><td colspan="${dates.length+1}"><span class="sec-row-lbl" style="color:${group.color}">${group.label}</span>${getShiftTimingStripHtml()}</td></tr>`;
+    tbody+=`<tr class="sec-row"><td colspan="${dates.length+1}"><span class="sec-row-lbl" style="color:${group.color}">${group.label}</span></td></tr>`;
     members.forEach(emp=>{
       const isMe=emp.id===SESSION.empObjId;
       const role=getEmpRole(emp);
@@ -5257,7 +5325,7 @@ function renderSchedule(){
       <td class="ecol" style="font-size:10px;font-weight:800;color:${colorSet.clr};padding:4px 6px;white-space:nowrap">${colorSet.icon} ${s.label||s.code}</td>
       ${dates.map(d => {
         const cnt = allEmps.filter(e=>getShift(e,d)===s.code).length;
-        const warn = _thresh > 0 && cnt > 0 && cnt < _thresh;
+        const warn = _thresh > 0 && cnt < _thresh;
         const bg = warn ? 'rgba(244,63,94,.18)' : colorSet.bg;
         const clr = warn ? '#f43f5e' : colorSet.clr;
         const extra = warn ? 'outline:2px solid rgba(244,63,94,.5);border-radius:3px;' : '';
@@ -8458,292 +8526,260 @@ function _parseImportWoff(val){
   return _WOFF_MAP[s]||'SUN';
 }
 
+function _isDateHeaderCol(key){
+  const s = String(key||'').trim();
+  if(!s) return false;
+  // Skip known non-date employee columns
+  const lower = s.toLowerCase();
+  if(/^(name|emp|e\s*code|code|id|designation|weekly|mobile|phone|joining|birth|dob|machine|resp|salary|section)/i.test(lower)) return false;
+  // 01-Jan-26, 1-Jan-2026, 01/01/2026, 2026-01-01, 01-Jan-2025 … up to 2+ years of columns
+  if(/^\d{1,2}[-/ .](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/ .]\d{2,4}$/i.test(s)) return true;
+  if(/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(s)) return true;
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return true;
+  if(/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/ .]\d{1,2}[, ]+\d{2,4}$/i.test(s)) return true;
+  // Excel may emit Date objects stringified
+  if(!isNaN(Date.parse(s)) && /\d{4}/.test(s) && (s.includes('-')||s.includes('/')||s.includes(' '))) return true;
+  return false;
+}
+
+function _parseHeaderDate(key){
+  const s = String(key||'').trim();
+  if(!s) return null;
+  // Prefer day-first for dd-MMM-yy / dd-MMM-yyyy
+  const m1 = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,9})[-/ ](\d{2,4})$/);
+  if(m1){
+    const day = parseInt(m1[1],10);
+    const monMap = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    const mon = monMap[m1[2].substring(0,3).toLowerCase()];
+    let year = parseInt(m1[3],10);
+    if(year < 100) year += 2000;
+    if(mon==null || day<1 || day>31) return null;
+    const d = new Date(year, mon, day);
+    if(isNaN(d)) return null;
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  const m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if(m2){
+    let day=parseInt(m2[1],10), mon=parseInt(m2[2],10), year=parseInt(m2[3],10);
+    if(year<100) year+=2000;
+    // if first number >12 treat as day-month-year else prefer day-month (IN format)
+    if(mon>12 && day<=12){ const t=day; day=mon; mon=t; }
+    const d=new Date(year, mon-1, day);
+    if(isNaN(d)) return null;
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if(!isNaN(d) && d.getFullYear()>2000){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  return null;
+}
+function _normShiftCode(val){
+  let s = String(val==null?'':val).trim().toUpperCase();
+  if(!s) return '';
+  // Excel sometimes gives formulas or spaces
+  s = s.replace(/\s+/g,'');
+  const map = {
+    'DAY':'D','D':'D','NIGHT':'N','N':'N',
+    'A':'A','B':'B','C':'C',
+    'O':'O','OFF':'O','WO':'O','W/OFF':'O','WEEKLYOFF':'O',
+    'L':'L','LEAVE':'L','SL':'L','CL':'L','EL':'L',
+    'C/O':'C/O','CO':'C/O','C-OFF':'C/O','COMPOFF':'C/O','COMP':'C/O',
+    'G':'G','GENERAL':'G','GEN':'G',
+    'GP':'GP','GATEPASS':'GP',
+    'HLF':'HLF','HALF':'HLF','½':'HLF','1/2':'HLF',
+    'AB':'Ab','ABS':'Ab','ABSENT':'Ab',
+    'H':'H','HOLIDAY':'H','OD':'OD'
+  };
+  return map[s] || (s.length<=3 ? s : '');
+}
+function _mapMachineToSec(machine, designation){
+  const raw = String(machine||'').trim();
+  const desig = String(designation||'').trim().toUpperCase();
+  const u = raw.toUpperCase().replace(/\s+/g,'');
+  // Supervisor and Engineer are the same category (by designation or machine)
+  if(/SHIFT\s*ENGINEER|\bENGINEER\b|SUPERVISOR|\bSUP\b/.test(desig)) return 'SUP';
+  if(/\bMANAGER\b|\bMGR\b/.test(desig) && !/TEAM\s*MEMBER/.test(desig)) return 'MGR';
+  if(!raw) return 'STAFF';
+  if(/^M-?1$/.test(u) || /METALLISER-?1/.test(u)) return 'M1';
+  if(/^M-?2$/.test(u) || /METALLISER-?2/.test(u)) return 'M2';
+  if(/^S-?1$/.test(u) || /SLITTER-?1/.test(u)) return 'S1';
+  if(/^S-?2$/.test(u) || /SLITTER-?2/.test(u)) return 'S2';
+  if(/SUP|SUPERVISOR|ENGINEER|SHIFTENG/.test(u)) return 'SUP';
+  if(/MGR|MANAGER/.test(u)) return 'MGR';
+  if(/METALLISER|^MET$/.test(u)) return 'MET';
+  if(/SLITTER|^SLIT$/.test(u)) return 'SLIT';
+  return raw;
+}
+
 function _processBulkImportRows(rows){
   const previewEl=document.getElementById('bulkImportPreview');
-  const existingCodes=new Set(getEmps().map(e=>(e.empId||'').toString().trim()));
-  const seenInFile=new Set();
+  if(!rows || !rows.length){
+    previewEl.innerHTML='<div style="color:var(--lv);padding:12px;font-size:12px">❌ No rows found in file.</div>';
+    return;
+  }
+
+  const existingByCode = {};
+  getEmps().forEach(e=>{
+    const c=(e.empId||'').toString().trim();
+    if(c) existingByCode[c]=e;
+  });
+
+  // Detect date columns from first row keys
+  const sampleKeys = Object.keys(rows[0]||{});
+  const dateCols = [];
+  sampleKeys.forEach(k=>{
+    if(_isDateHeaderCol(k)){
+      const iso = _parseHeaderDate(k);
+      if(iso) dateCols.push({ key:k, iso });
+    }
+  });
+  // sort by date
+  dateCols.sort((a,b)=>a.iso.localeCompare(b.iso));
+
   _bulkImportParsed=[];
-  let dupCount=0, invalidCount=0;
+  let invalidCount=0, updateCount=0, createCount=0;
+  const seenInFile=new Set();
 
   rows.forEach(row=>{
     const name=(_findCol(row,['name','naam','नाम'])||'').toString().trim().toUpperCase();
-    const code=(_findCol(row,['e code','ecode','emp code','employee code','code'])||'').toString().trim();
-    const designation=(_findCol(row,['designation','position','role'])||'').toString().trim();
-    const machine=(_findCol(row,['machine','mc'])||'').toString().trim();
+    const code=(_findCol(row,['emp id','empid','e code','ecode','emp code','employee code','employee id','code','id'])||'').toString().trim();
+    const designation=(_findCol(row,['designation','position','role','desig'])||'').toString().trim();
+    const machine=(_findCol(row,['machine','mc','section','sec'])||'').toString().trim();
     const resp=(_findCol(row,['responsibility','resp'])||'').toString().trim();
-    const salary=(_findCol(row,['salary','monthly salary'])||'').toString().trim();
+    const salaryRaw=(_findCol(row,['salary','monthly salary','salary (₹/month)','salary (rs/month)','salary(₹/month)'])||'').toString().trim().replace(/[^0-9.]/g,'');
     let mobile=(_findCol(row,['mobile','mobile number','phone','phone number','contact'])||'').toString().trim().replace(/[^0-9]/g,'');
-    if(mobile.length===12 && mobile.startsWith('91')) mobile=mobile.slice(2); // strip country code if present
-    if(mobile.length!==10) mobile=''; // ignore invalid mobile, don't block the row
+    if(mobile.length===12 && mobile.startsWith('91')) mobile=mobile.slice(2);
+    if(mobile.length!==10) mobile='';
     const joiningDate=_parseImportDate(_findCol(row,['joining date','joining','date of joining','doj']));
     const dob=_parseImportDate(_findCol(row,['date of birth','dob','birth date','birthday']));
-    const woff=_parseImportWoff(_findCol(row,['weekly off','week off','weekly holiday','woff']));
+    const woff=_parseImportWoff(_findCol(row,['weekly off','week off','weekly holiday','woff','w-off','w off']));
 
     if(!name || !code){ invalidCount++; return; }
-    if(existingCodes.has(code) || seenInFile.has(code)){ dupCount++; return; }
+    if(seenInFile.has(code)){ return; }
     seenInFile.add(code);
-    _bulkImportParsed.push({name,code,designation,machine,resp,salary,mobile,joiningDate,dob,woff});
+
+    // Collect shifts by date
+    const shiftsByDate = {};
+    dateCols.forEach(dc=>{
+      const raw = row[dc.key];
+      const sh = _normShiftCode(raw);
+      if(sh) shiftsByDate[dc.iso] = sh;
+    });
+
+    const existing = existingByCode[code];
+    if(existing) updateCount++; else createCount++;
+
+    _bulkImportParsed.push({
+      name, code, designation, machine, resp,
+      salary: salaryRaw, mobile, joiningDate, dob, woff,
+      sec: _mapMachineToSec(machine, designation),
+      shiftsByDate,
+      existingId: existing ? existing.id : null
+    });
   });
 
   if(!_bulkImportParsed.length){
     previewEl.innerHTML=`<div style="color:var(--lv);padding:12px;font-size:12px">
-      ❌ कोई valid row नहीं मिली। ${invalidCount?invalidCount+' rows में Name/E-Code missing. ':''}${dupCount?dupCount+' duplicate codes skip हुए.':''}
+      ❌ No valid rows. ${invalidCount?invalidCount+' missing Name/Emp ID. ':''}
     </div>`;
     return;
   }
 
+  const withShifts = _bulkImportParsed.filter(e=>Object.keys(e.shiftsByDate||{}).length).length;
+  const months = new Set();
+  _bulkImportParsed.forEach(e=>Object.keys(e.shiftsByDate||{}).forEach(d=>months.add(d.substring(0,7))));
   const mobileCount=_bulkImportParsed.filter(e=>e.mobile).length;
+
   previewEl.innerHTML=`
-    <div style="font-size:12px;font-weight:800;color:#22c55e;margin-bottom:8px">
-      ✅ ${_bulkImportParsed.length} नए कर्मचारी तैयार ${dupCount?'· '+dupCount+' duplicate skip हुए':''}${invalidCount?'· '+invalidCount+' invalid rows skip हुए':''}
+    <div style="font-size:13px;font-weight:800;color:#22c55e;margin-bottom:8px">
+      ✅ ${_bulkImportParsed.length} employees ready
     </div>
-    ${mobileCount?`<div style="font-size:11px;color:#60a5fa;margin-bottom:8px">📱 ${mobileCount} में Mobile Number है — वो OTP से सीधे Login कर पाएंगे</div>`:''}
-    <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px">
-      ${_bulkImportParsed.map(e=>`
-        <div style="padding:8px 10px;border-bottom:1px solid var(--border2);font-size:12px">
-          <b style="color:var(--text)">${e.name}</b> <span style="color:#64748b">(${e.code})</span>${e.mobile?' <span style="color:#60a5fa">📱 '+e.mobile+'</span>':''}<br>
-          <span style="color:#64748b">${e.designation||'—'} · ${e.machine||'—'} · ${e.resp||'—'}${e.salary?' · ₹'+e.salary:''}</span><br>
-          <span style="color:#64748b;font-size:11px">Weekly Off: ${e.woff}${e.joiningDate?' · Joined: '+e.joiningDate:''}${e.dob?' · DOB: '+e.dob:''}</span>
-        </div>`).join('')}
+    <div style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:10px">
+      🆕 Create: <b>${createCount}</b> &nbsp;·&nbsp; 🔄 Update: <b>${updateCount}</b><br>
+      ${dateCols.length?`📅 Shift date columns: <b>${dateCols.length}</b> (${dateCols[0].iso} → ${dateCols[dateCols.length-1].iso})<br>`:''}
+      ${months.size?`📆 Months to write: <b>${[...months].sort().join(', ')}</b><br>`:''}
+      ${withShifts?`👥 Rows with shifts: <b>${withShifts}</b><br>`:''}
+      ${mobileCount?`📱 Mobile (OTP login ready): <b>${mobileCount}</b>`:''}
     </div>
-    <button id="bulkImportSubmitBtn" class="submit-btn" style="margin-top:12px" onclick="confirmBulkImportTeam()">✅ ${_bulkImportParsed.length} कर्मचारी Import करें</button>`;
-}
-
-// ════════════════════════════════════════
-// DELETE ALL MEMBERS (OTP-verified, destructive)
-// ════════════════════════════════════════
-let _deleteFlowConfirmResult=null;
-let _deleteFlowRecaptcha=null;
-
-async function startDeleteAllMembersFlow(){
-  const myTeam=getEmps();
-  if(!myTeam.length){ toast('⚠️ आपकी Team पहले से खाली है'); return; }
-  const ok=await confirmModal(
-    '🗑️ सभी Team Members Delete करें?',
-    `आपकी Team के <b>${myTeam.length} Members</b> हमेशा के लिए Delete हो जाएंगे। यह Undo नहीं हो सकता।<br><br>Confirm करने के लिए आपके registered mobile पर OTP भेजा जाएगा।`,
-    '📱 OTP भेजें','रद्द करें'
-  );
-  if(!ok) return;
-  await _sendDeleteFlowOTP();
-}
-
-async function _sendDeleteFlowOTP(){
-  if(!SESSION.mobile){ toast('❌ Mobile number नहीं मिला'); return; }
-  try{
-    toast('OTP भेजा जा रहा है...');
-    if(!_deleteFlowRecaptcha){
-      _deleteFlowRecaptcha=new window._fbRecaptchaVerifierClass(window._fbAuth,'recaptcha-container',{size:'invisible'});
-    }
-    _deleteFlowConfirmResult=await window._fbSignInWithPhoneNumber(window._fbAuth,SESSION.mobile,_deleteFlowRecaptcha);
-    openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">📱 OTP डालें</div>
-    <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">${SESSION.mobile} पर OTP भेजा गया</div>
-    <div class="field">
-      <input type="text" id="deleteFlowOtpInput" inputmode="numeric" maxlength="6" placeholder="6 अंकों का OTP" style="width:100%;text-align:center;font-size:20px;letter-spacing:6px">
+    <div style="max-height:160px;overflow:auto;font-size:11px;color:var(--muted2);margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:8px">
+      ${_bulkImportParsed.slice(0,12).map(e=>`<div>${e.existingId?'🔄':'🆕'} <b style="color:var(--text)">${e.name}</b> · ${e.code} · ${e.sec||'—'} · ${Object.keys(e.shiftsByDate||{}).length} days</div>`).join('')}
+      ${_bulkImportParsed.length>12?`<div>… +${_bulkImportParsed.length-12} more</div>`:''}
     </div>
-    <div id="deleteFlowOtpErr" style="color:var(--lv);font-size:12px;margin-top:6px"></div>
-    <button class="submit-btn" style="margin-top:14px;background:#f43f5e" onclick="_verifyDeleteFlowOTP()">🗑️ Verify करके Delete करें</button>
-    <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
-    document.getElementById('deleteFlowOtpInput')?.focus();
-    toast('✅ OTP भेज दिया!');
-  }catch(err){
-    console.error('Delete flow OTP error:',err);
-    _deleteFlowRecaptcha=null;
-    toast('❌ OTP नहीं भेजा: '+(err.message||err.code));
-  }
+    <button class="submit-btn" onclick="confirmBulkImportTeam()">💾 Import Team + Shifts</button>
+  `;
 }
-
-async function _verifyDeleteFlowOTP(){
-  const otp=(document.getElementById('deleteFlowOtpInput')?.value||'').trim();
-  const errEl=document.getElementById('deleteFlowOtpErr');
-  if(otp.length!==6){ if(errEl) errEl.textContent='⚠️ 6 अंकों का OTP डालें'; return; }
-  if(!_deleteFlowConfirmResult){ if(errEl) errEl.textContent='❌ फिर से कोशिश करें'; return; }
-  try{
-    await _deleteFlowConfirmResult.confirm(otp);
-    // OTP verified — proceed with deletion
-    const myTeam=getEmps();
-    let deleted=0;
-    for(const emp of myTeam){
-      try{ await fbRemove('employees/'+emp.id); deleted++; }catch(e){}
-    }
-    closeModal();
-    toast(`🗑️ ${deleted} Team Members delete हो गए`);
-    _deleteFlowConfirmResult=null;
-    renderTeam();
-    refreshAll();
-  }catch(err){
-    console.error('Delete flow verify error:',err);
-    if(errEl) errEl.textContent='❌ गलत OTP — फिर कोशिश करें';
-  }
-}
-
-
-// ════════════════════════════════════════
-// EDIT PROFILE — Name & Photo (self-registered Manager/Member)
-// ════════════════════════════════════════
-let _editProfilePhotoData=null;
-
-function openEditProfileModal(){
-  _editProfilePhotoData=SESSION.photoUrl||null;
-  closeModal();
-  openModal(`<div class="modal-handle"></div>
-  <div class="modal-title">✏️ Profile Edit करें</div>
-  <div style="text-align:center;margin-bottom:16px">
-    <div id="editProfilePhotoPreview" style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:32px;font-weight:900;color:#fff;overflow:hidden">${SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}</div>
-    <input type="file" id="editProfilePhotoInput" accept="image/*" style="display:none" onchange="_handleProfilePhotoSelect(this.files[0])">
-    <button class="cancel-btn" onclick="document.getElementById('editProfilePhotoInput').click()">📷 फोटो चुनें</button>
-  </div>
-  <div class="field">
-    <label>नाम</label>
-    <input type="text" id="editProfileNameInput" value="${(SESSION.name||'').replace(/"/g,'&quot;')}" style="width:100%">
-  </div>
-  <button class="submit-btn" style="margin-top:14px" onclick="_saveEditProfile()">✅ Save करें</button>
-  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
-}
-
-function _handleProfilePhotoSelect(file){
-  if(!file) return;
-  if(!file.type.startsWith('image/')){ toast('⚠️ केवल Image file चुनें'); return; }
-  const reader=new FileReader();
-  reader.onload=e=>{
-    const img=new Image();
-    img.onload=()=>{
-      const maxSize=200;
-      let w=img.width, h=img.height;
-      if(w>h){ if(w>maxSize){ h=Math.round(h*maxSize/w); w=maxSize; } }
-      else{ if(h>maxSize){ w=Math.round(w*maxSize/h); h=maxSize; } }
-      const canvas=document.createElement('canvas');
-      canvas.width=w; canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
-      const dataUrl=canvas.toDataURL('image/jpeg',0.75);
-      _editProfilePhotoData=dataUrl;
-      const preview=document.getElementById('editProfilePhotoPreview');
-      if(preview) preview.innerHTML=`<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
-    };
-    img.src=e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-async function _saveEditProfile(){
-  const newName=(document.getElementById('editProfileNameInput')?.value||'').trim();
-  if(!newName){ toast('⚠️ नाम खाली नहीं हो सकता'); return; }
-  try{
-    const mobileKey=_normMobileKey(SESSION.mobile);
-    const updates={name:newName};
-    if(_editProfilePhotoData) updates.photoUrl=_editProfilePhotoData;
-    await fbUpdate('mobileUsers/'+mobileKey,updates);
-    SESSION.name=newName;
-    if(_editProfilePhotoData) SESSION.photoUrl=_editProfilePhotoData;
-    saveSession();
-    closeModal();
-    toast('✅ Profile update हो गई');
-    const ini=(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2);
-    const userAvEl=document.getElementById('userAv');
-    if(userAvEl){
-      userAvEl.innerHTML = SESSION.photoUrl?`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:ini;
-    }
-    const nameEl=document.getElementById('userHdrName');
-    if(nameEl) nameEl.textContent=(SESSION.name||'Guest').split(' ')[0];
-  }catch(e){ toast('❌ Error: '+e.message); }
-}
-
-
-function openChangeCompanyModal(){
-  closeModal();
-  openModal(`<div class="modal-handle"></div>
-  <div class="modal-title">🏢 Company Name बदलें</div>
-  <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">वर्तमान Company: <b style="color:var(--text)">${SESSION.company||'—'}</b></div>
-  <div class="field">
-    <label>नई Company का नाम</label>
-    <input type="text" id="newCompanyNameInput" placeholder="जैसे: ABC Industries" style="width:100%">
-  </div>
-  <button class="submit-btn" style="margin-top:12px" onclick="_confirmChangeCompany()">आगे बढ़ें</button>
-  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">रद्द करें</button>`);
-}
-
-async function _confirmChangeCompany(){
-  const newName=(document.getElementById('newCompanyNameInput')?.value||'').trim();
-  if(!newName){ toast('⚠️ Company का नाम लिखें'); return; }
-  if(newName===SESSION.company){ toast('⚠️ यह तो वर्तमान नाम ही है'); return; }
-
-  const myKey=_normMobileKey(SESSION.mobile);
-  const myTeam=getEmps(); // employees where managerId === myKey (own team)
-  const teamCount=myTeam.length;
-
-  closeModal();
-  if(teamCount>0){
-    const wantDelete=await confirmModal(
-      '⚠️ अपनी पुरानी Team का क्या करें?',
-      `आपकी वर्तमान Company (<b>${SESSION.company}</b>) में <b>${teamCount} Team Members</b> हैं।<br><br>
-       क्या आप Company का नाम बदलते समय इन सभी को <b style="color:#f43f5e">DELETE</b> करना चाहते हैं, या इन्हें नई Company के नाम पर <b style="color:#22c55e">रखना</b> चाहते हैं?`,
-      '🗑️ हाँ, सभी Delete करें','✅ नहीं, Team रखें (सिर्फ नाम बदलें)'
-    );
-    await _applyCompanyChange(newName, wantDelete, myKey);
-  }else{
-    await _applyCompanyChange(newName, false, myKey);
-  }
-}
-
-async function _applyCompanyChange(newName, deleteTeam, myKey){
-  try{
-    if(deleteTeam){
-      const myTeam=getEmps();
-      for(const emp of myTeam){
-        await fbRemove('employees/'+emp.id);
-      }
-      toast('🗑️ पुरानी Team delete हो गई...');
-    }else{
-      const myTeam=getEmps();
-      for(const emp of myTeam){
-        await fbUpdate('employees/'+emp.id,{companyId:_normCompanyId(newName),companyLabel:newName});
-      }
-    }
-    // Update own mobileUsers record
-    const mobileKey=_normMobileKey(SESSION.mobile);
-    await fbUpdate('mobileUsers/'+mobileKey,{company:newName});
-    // Update SESSION
-    SESSION.company=newName;
-    SESSION.companyId=_normCompanyId(newName);
-    saveSession();
-    toast('✅ Company Name बदल गया: '+newName);
-    refreshAll();
-  }catch(e){ toast('❌ Error: '+e.message); }
-}
-
 
 let _bulkImportInProgress=false;
 async function confirmBulkImportTeam(){
-  if(_bulkImportInProgress) return; // prevent duplicate submissions from rapid/multiple clicks
+  if(_bulkImportInProgress) return;
   if(!_bulkImportParsed.length) return;
   _bulkImportInProgress=true;
-  const btn=document.getElementById('bulkImportSubmitBtn');
-  if(btn){ btn.disabled=true; btn.style.opacity='0.5'; btn.textContent='⏳ Import हो रहा है...'; }
-  const cid=myCompanyId()==='ALL'?'gls':myCompanyId();
-  const label=SESSION.company||'GLS';
-  const mgrId=(SESSION.role==='manager' && SESSION.mobile)?_normMobileKey(SESSION.mobile):'';
-  let saved=0, failed=0, registered=0;
-  for(const [i,e] of _bulkImportParsed.entries()){
+
+  const cid = (typeof myCompanyId==='function') ? myCompanyId() : (SESSION.companyId||'');
+  const label = SESSION.company || SESSION.companyLabel || '';
+  const mgrId = (SESSION.role==='manager' && SESSION.mobile) ? _normMobileKey(SESSION.mobile) : (SESSION.managerId||'');
+
+  let saved=0, updated=0, created=0, failed=0, registered=0;
+  const schedByMonth = {}; // mk -> { empId/internalId: [31] }
+
+  const empIdToInternal = {};
+  getEmps().forEach(e=>{ if(e.empId) empIdToInternal[String(e.empId).trim()]=e.id; });
+
+  for(let i=0;i<_bulkImportParsed.length;i++){
+    const e=_bulkImportParsed[i];
     try{
-      const id='e'+Date.now().toString(36)+i;
-      const rec={
-        id, name:e.name, empId:e.code,
-        sec:(e.machine||'STAFF').toString().trim().toUpperCase(), designation:e.designation||'',
-        mc:e.machine||'—', resp:e.resp||'',
-        monthlySalary:e.salary?Number(e.salary)||0:0,
-        woff:e.woff||'SUN', status:'active',
-        companyId:cid, companyLabel:label,
-        ms:Array(31).fill('D')
+      let id = e.existingId;
+      const sec = e.sec || _mapMachineToSec(e.machine, e.designation);
+      const rec = {
+        name: e.name,
+        empId: e.code,
+        sec: sec,
+        mc: e.machine || sec || '—',
+        designation: e.designation || '',
+        resp: e.resp || '',
+        monthlySalary: e.salary ? Number(e.salary)||0 : 0,
+        woff: e.woff || 'SUN',
+        status: 'active',
       };
       if(e.joiningDate) rec.joiningDate=e.joiningDate;
       if(e.dob) rec.dob=e.dob;
-      if(mgrId) rec.managerId=mgrId;
       if(e.mobile) rec.phone=e.mobile;
-      await fbSet('employees/'+id,rec);
+      if(cid){ rec.companyId=cid; rec.companyLabel=label; }
+      if(mgrId) rec.managerId=mgrId;
+
+      if(id){
+        // Update existing — merge only provided fields
+        const patch = { ...rec };
+        await fbUpdate('employees/'+id, patch);
+        updated++;
+      } else {
+        id = 'e'+Date.now().toString(36)+i+Math.random().toString(36).slice(2,5);
+        rec.id = id;
+        rec.ms = Array(31).fill('');
+        await fbSet('employees/'+id, rec);
+        created++;
+        empIdToInternal[e.code] = id;
+      }
       saved++;
 
-      // Pre-approve login for this Member if a mobile number was given —
-      // they'll be auto-logged-in on their next OTP verification, no registration form needed.
+      // Build schedule arrays per month
+      Object.entries(e.shiftsByDate||{}).forEach(([iso, sh])=>{
+        const mk = iso.substring(0,7).replace('-','_');
+        const dayIdx = parseInt(iso.split('-')[2],10)-1;
+        if(dayIdx<0 || dayIdx>30) return;
+        if(!schedByMonth[mk]) schedByMonth[mk] = {};
+        const daysInMonth = new Date(parseInt(iso.slice(0,4),10), parseInt(iso.slice(5,7),10), 0).getDate();
+        if(!schedByMonth[mk][e.code]) schedByMonth[mk][e.code] = new Array(daysInMonth).fill('');
+        schedByMonth[mk][e.code][dayIdx] = sh;
+        // also by internal id
+        if(id){
+          if(!schedByMonth[mk][id]) schedByMonth[mk][id] = new Array(daysInMonth).fill('');
+          schedByMonth[mk][id][dayIdx] = sh;
+        }
+      });
+
       if(e.mobile){
         try{
           const existing=await fbGet('mobileUsers/'+e.mobile);
@@ -8752,20 +8788,55 @@ async function confirmBulkImportTeam(){
               role:'member', name:e.name, mobile:'+91'+e.mobile, company:label,
               status:'approved', empCode:e.code, managerId:mgrId||'',
               registeredAt:new Date().toISOString(),
-              approvedAt:new Date().toISOString(), approvedBy:SESSION.name+' (Excel Import)'
+              approvedAt:new Date().toISOString(), approvedBy:(SESSION.name||'Manager')+' (Excel Import)'
             });
             registered++;
           }
-        }catch(ex){ console.warn('mobileUsers pre-approve skipped for',e.mobile,ex); }
+        }catch(ex){ console.warn('mobileUsers pre-approve skipped',e.mobile,ex); }
       }
-    }catch(err){ failed++; console.error('Bulk import error:',e.name,err); }
+    }catch(err){
+      failed++;
+      console.error('Bulk import error', e.name, err);
+    }
   }
+
+  // Save schedules (supports up to 2+ years of daily columns across many months)
+  let monthsSaved=0;
+  const monthKeys = Object.keys(schedByMonth).sort();
+  for(const mk of monthKeys){
+    try{
+      const existing = (getSchedules()[mk]||{});
+      const merged = { ...existing };
+      Object.entries(schedByMonth[mk]).forEach(([empKey, arr])=>{
+        // merge day-by-day so we don't wipe other days already in Firebase
+        const prev = Array.isArray(merged[empKey]) ? merged[empKey].slice() : [];
+        const out = new Array(Math.max(prev.length, arr.length, 31)).fill('');
+        for(let d=0; d<out.length; d++){
+          out[d] = (arr[d] != null && arr[d] !== '') ? arr[d] : (prev[d] || '');
+        }
+        merged[empKey] = out;
+      });
+      await fbSet('schedules/'+mk, merged);
+      // update local cache if present
+      try{
+        if(_cache && _cache.schedules) _cache.schedules[mk] = merged;
+      }catch(e){}
+      monthsSaved++;
+    }catch(err){
+      console.error('Schedule save error', mk, err);
+    }
+  }
+
   _bulkImportParsed=[];
   _bulkImportInProgress=false;
   closeModal();
-  toast(`✅ ${saved} कर्मचारी Team में जुड़ गए!${registered?' '+registered+' का Login भी ready है।':''}${failed?' '+failed+' fail हुए.':''}`);
-  renderTeam();
-  refreshAll();
+  toast(`✅ Team import: ${created} new, ${updated} updated` +
+    (monthsSaved?`, ${monthsSaved} month(s) schedule`:``) +
+    (registered?`, ${registered} login ready`:``) +
+    (failed?`, ${failed} failed`:``));
+  try{ renderTeam(); }catch(e){}
+  try{ refreshAll(); }catch(e){}
+  try{ if(typeof renderSchedule==='function') renderSchedule(); }catch(e){}
 }
 
 function _buildSecOptions(selectedSec){
@@ -12104,7 +12175,7 @@ function printSched(){
       filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
     { id:'slit_asst', label:'✂️ Slitter — Team',              checked:true,
       filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { id:'sup',       label:'👷 Supervisors',                  checked:true,
+    { id:'sup',       label:'👷 Supervisors / Engineers',                  checked:true,
       filter:e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; } },
     { id:'mgr',       label:'🎯 Manager',                      checked:false,
       filter:e=>{ const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
@@ -12177,7 +12248,7 @@ async function _execPrint(){
     { id:'slit_main', label:'⭐ SLITTER — MAIN OPERATORS',    color:'#0284c7', filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
     { id:'slit_rel',  label:'🔄 SLITTER — RELIEVERS',         color:'#0ea5e9', filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
     { id:'slit_asst', label:'✂️ SLITTER — TEAM',              color:'#38bdf8', filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { id:'sup',       label:'👷 SUPERVISORS',                  color:'#7c3aed', filter:e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; } },
+    { id:'sup',       label:'👷 SUPERVISORS / ENGINEERS',                  color:'#7c3aed', filter:e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; } },
     { id:'mgr',       label:'🎯 MANAGER',                      color:'#a21caf', filter:e=>{ const k=_normSecKey(e.sec); return k==='MGR'||k==='MANAGER'; } },
     { id:'current',   label:'📋 CURRENT VIEW',                 color:'#0ea5e9', filter:e=>getSchedFilteredEmps().some(x=>x.id===e.id) },
     { id:'all',       label:'📋 ALL EMPLOYEES',                color:'#64748b', filter:e=>true },
@@ -12370,7 +12441,7 @@ function exportSchedExcel(){
     { label:'⭐ SLITTER — MAIN OPERATORS',     filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
     { label:'🔄 SLITTER — RELIEVERS',          filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
     { label:'✂️ SLITTER — TEAM',               filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { label:'👷 SUPERVISORS',                   filter:e=>e.sec==='SUP' },
+    { label:'👷 SUPERVISORS / ENGINEERS',                   filter:e=>e.sec==='SUP' },
     { label:'🎯 MANAGER',                       filter:e=>e.sec==='MGR' },
   ].filter(g=>allEmps.some(g.filter));
 
