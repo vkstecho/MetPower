@@ -2041,3 +2041,29 @@ body.light .sched-lbl {
   border: 1px solid #334155 !important;
   font-weight: 700 !important;
 }
+
+
+/* Team page action buttons — solid high-contrast */
+.team-btn-add,
+.team-btn-import,
+.team-btn-delete {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 900 !important;
+  letter-spacing: .2px;
+}
+body.light .team-btn-add,
+body.light .team-btn-import,
+body.light .team-btn-delete {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+body.light .team-btn-add {
+  background: linear-gradient(135deg,#ea580c,#c2410c) !important;
+}
+body.light .team-btn-import {
+  background: linear-gradient(135deg,#16a34a,#15803d) !important;
+}
+body.light .team-btn-delete {
+  background: linear-gradient(135deg,#e11d48,#be123c) !important;
+}

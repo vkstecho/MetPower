@@ -879,6 +879,8 @@ function _defaultShiftConfig(){
     minSlit: 3,
     minSup: 2,
     minBySec: {},
+    hideSummaryDN: false,   // Profile: hide D & N count rows
+    hideSummaryABC: false,  // Profile: hide A, B, C count rows
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
     updatedAt: null
@@ -1753,6 +1755,11 @@ function _onOtpInput(val){
 }
 
 async function _sendOTP(isResend){
+  // Device-OTP overlay uses same button id sometimes — route if employee flow active
+  if(_otpEmp && document.getElementById('otpLoginOverlay')?.style.display !== 'none'
+      && document.getElementById('otpLoginOverlay')?.style.display !== ''){
+    return _sendDeviceOTP(!!isResend);
+  }
   const mobileEl=document.getElementById('loginMobile');
   const mobile=(mobileEl?.value||'').trim().replace(/\D/g,'');
   if(mobile.length!==10){ toast('⚠️ 10 अंकों का Mobile Number डालें'); return; }
@@ -1761,28 +1768,8 @@ async function _sendOTP(isResend){
   const errEl=document.getElementById('loginErr');
   if(errEl) errEl.textContent='';
   try{
-    if(!window._fbAuth || !window._fbRecaptchaVerifierClass || !window._fbSignInWithPhoneNumber){
-      throw new Error('Firebase Auth अभी ready नहीं है — 2 सेकंड बाद फिर try करें');
-    }
-    // Ensure reCAPTCHA host element exists (required by Firebase Phone Auth)
-    let rc = document.getElementById('recaptcha-container');
-    if(!rc){
-      rc = document.createElement('div');
-      rc.id = 'recaptcha-container';
-      document.body.prepend(rc);
-    }
-    // Always rebuild verifier on resend or if previous attempt failed
-    if(window._fbRecaptchaNew){
-      try{ window._fbRecaptchaNew.clear(); }catch(e){}
-      window._fbRecaptchaNew = null;
-    }
-    window._fbRecaptchaNew = new window._fbRecaptchaVerifierClass(
-      window._fbAuth,
-      'recaptcha-container',
-      { size:'invisible', callback:()=>{}, 'expired-callback':()=>{ window._fbRecaptchaNew=null; } }
-    );
-    toast('OTP भेजा जा रहा है...');
-    _loginConfirmResult = await window._fbSignInWithPhoneNumber(window._fbAuth, fullPhone, window._fbRecaptchaNew);
+    toast(isResend ? '⏳ Resending OTP…' : 'OTP भेजा जा रहा है...');
+    _loginConfirmResult = await _fbSendPhoneOtp(fullPhone, 'recaptcha-container', '_fbRecaptchaNew');
     showStep(2);
     const sentEl=document.getElementById('otpSentTo');
     if(sentEl) sentEl.textContent='+91-'+mobile+' पर OTP भेजा गया';
@@ -1791,10 +1778,7 @@ async function _sendOTP(isResend){
     toast('✅ OTP भेज दिया!');
   }catch(err){
     console.error('OTP error:',err);
-    window._fbRecaptchaNew=null;
-    const msg=err.code==='auth/too-many-requests'
-      ?'⚠️ बहुत attempts — कुछ देर बाद कोशिश करें'
-      :'❌ OTP नहीं भेजा: '+(err.message||err.code);
+    const msg = '❌ '+_fbOtpErrorMessage(err);
     if(errEl) errEl.textContent=msg; toast(msg);
   }
 }
@@ -1817,19 +1801,22 @@ function _startResendTimer(){
 }
 
 async function _verifyOTP(){
-  const otp=(document.getElementById('otpInput')?.value||'').trim();
+  // If device OTP overlay is open, use device flow
+  const ov = document.getElementById('otpLoginOverlay');
+  if(_otpEmp && ov && ov.style.display !== 'none' && ov.style.display !== ''){
+    return _verifyDeviceOTP();
+  }
+  const otp=(document.getElementById('otpInput')?.value||'').trim().replace(/\D/g,'');
   if(otp.length!==6){ toast('⚠️ 6 अंकों का OTP डालें'); return; }
   if(!_loginConfirmResult){ toast('⚠️ OTP पहले भेजें'); return; }
   try{
     toast('⏳ Verify हो रहा है...');
-    await _loginConfirmResult.confirm(otp);
+    await _fbVerifyPhoneOtp(_loginConfirmResult, otp);
     toast('✅ Mobile Verified!');
     await _checkUserAfterOTP();
   }catch(err){
     const errEl=document.getElementById('loginErr2');
-    const msg=err.code==='auth/invalid-verification-code'
-      ?'❌ गलत OTP — सही OTP डालें'
-      :'❌ '+(err.message||err.code);
+    const msg='❌ '+_fbOtpErrorMessage(err);
     if(errEl) errEl.textContent=msg; toast(msg);
   }
 }
@@ -2609,6 +2596,81 @@ function _forgotPw(empId, empName){
 }
 
 // ════════════════════════════════════════
+// SHARED FIREBASE PHONE OTP
+// ════════════════════════════════════════
+/** Ensure Auth + Recaptcha + Phone APIs are available */
+function _fbPhoneAuthReady(){
+  return !!(window._fbAuth && window._fbRecaptchaVerifierClass && window._fbSignInWithPhoneNumber);
+}
+
+/** Build / rebuild invisible Recaptcha on a container element id */
+function _fbMakeRecaptcha(containerId, storeKey){
+  const key = storeKey || ('_fbRc_' + containerId);
+  try{
+    if(window[key]){ try{ window[key].clear(); }catch(e){} window[key]=null; }
+  }catch(e){}
+  let el = document.getElementById(containerId);
+  if(!el){
+    el = document.createElement('div');
+    el.id = containerId;
+    el.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(el);
+  } else {
+    el.innerHTML = '';
+  }
+  window[key] = new window._fbRecaptchaVerifierClass(
+    window._fbAuth,
+    containerId,
+    {
+      size: 'invisible',
+      callback: ()=>{},
+      'expired-callback': ()=>{ try{ window[key]=null; }catch(e){} }
+    }
+  );
+  return window[key];
+}
+
+/**
+ * Send OTP to E.164 phone (e.g. +9198xxxxxxxx).
+ * Returns Firebase ConfirmationResult or throws.
+ */
+async function _fbSendPhoneOtp(e164Phone, containerId, storeKey){
+  if(!_fbPhoneAuthReady()){
+    throw new Error('Firebase Auth not ready — wait 2 seconds and try again');
+  }
+  const phone = String(e164Phone||'').trim();
+  if(!/^\+91\d{10}$/.test(phone) && !/^\+\d{10,15}$/.test(phone)){
+    throw new Error('Invalid phone number');
+  }
+  const verifier = _fbMakeRecaptcha(containerId || 'recaptcha-container', storeKey || '_fbRecaptchaNew');
+  const confirmation = await window._fbSignInWithPhoneNumber(window._fbAuth, phone, verifier);
+  return confirmation;
+}
+
+/** Verify 6-digit code against a ConfirmationResult */
+async function _fbVerifyPhoneOtp(confirmationResult, code){
+  const otp = String(code||'').replace(/\D/g,'').slice(0,6);
+  if(otp.length !== 6) throw new Error('Enter 6-digit OTP');
+  if(!confirmationResult || typeof confirmationResult.confirm !== 'function'){
+    throw new Error('OTP session expired — send OTP again');
+  }
+  return await confirmationResult.confirm(otp);
+}
+
+function _fbOtpErrorMessage(err){
+  const code = err && (err.code || '');
+  const msg = (err && err.message) || String(err||'');
+  if(code === 'auth/invalid-verification-code') return 'Wrong OTP — check SMS and try again';
+  if(code === 'auth/code-expired') return 'OTP expired — request a new one';
+  if(code === 'auth/too-many-requests') return 'Too many attempts — wait and try later';
+  if(code === 'auth/network-request-failed') return 'Network error — check internet';
+  if(code === 'auth/captcha-check-failed') return 'Captcha failed — reload page and retry';
+  if(code === 'auth/invalid-phone-number') return 'Invalid mobile number';
+  if(/Firebase Auth not ready/i.test(msg)) return msg;
+  return msg || 'OTP failed';
+}
+
+// ════════════════════════════════════════
 // OTP LOGIN SYSTEM
 // ════════════════════════════════════════
 let _otpEmp = null;
@@ -2633,8 +2695,9 @@ async function showOTPLoginScreen(emp, deviceId){
         <b style="color:#f97316">${emp.name}</b><br>
         <span style="font-size:12px">+91 ${maskedPhone} पर OTP भेजा जाएगा</span>
       </div>
+      <div id="recaptcha-container-device"></div>
       <div id="otpStep1" style="">
-        <button onclick="_sendOTP()" id="sendOtpBtn"
+        <button onclick="_sendDeviceOTP()" id="sendOtpBtn"
           style="width:100%;padding:16px;background:linear-gradient(135deg,#22c55e,#15803d);border:none;
                  border-radius:13px;color:#fff;font-size:17px;font-weight:900;cursor:pointer;
                  margin-bottom:12px;font-family:inherit">
@@ -2654,7 +2717,7 @@ async function showOTPLoginScreen(emp, deviceId){
             oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6);_otpValidate()">
           <div id="otpErr" style="color:#f43f5e;font-size:12px;margin-top:8px;min-height:16px;text-align:center"></div>
         </div>
-        <button id="verifyOtpBtn" onclick="_verifyOTP()" disabled
+        <button id="verifyOtpBtn" onclick="_verifyDeviceOTP()" disabled
           style="width:100%;padding:16px;background:linear-gradient(135deg,#f97316,#c2410c);border:none;
                  border-radius:13px;color:#fff;font-size:17px;font-weight:900;cursor:pointer;
                  margin-bottom:10px;opacity:.4;pointer-events:none;font-family:inherit">
@@ -2684,6 +2747,86 @@ function _otpValidate(){
     if(btn){ btn.style.opacity='.4'; btn.style.pointerEvents='none'; btn.disabled=true; }
   }
 }
+
+let _deviceOtpConfirm = null;
+let _deviceOtpBusy = false;
+
+async function _sendDeviceOTP(isResend){
+  if(_deviceOtpBusy) return;
+  if(!_otpEmp || !_otpEmp.phone){ toast('⚠️ Employee mobile missing'); return; }
+  const digits = String(_otpEmp.phone).replace(/\D/g,'');
+  const mobile = (digits.length===12 && digits.startsWith('91')) ? digits.slice(2) : digits;
+  if(mobile.length!==10){ toast('⚠️ Invalid employee mobile'); return; }
+  _deviceOtpBusy = true;
+  const btn = document.getElementById('sendOtpBtn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Sending…'; }
+  try{
+    toast(isResend?'⏳ Resending OTP…':'OTP भेजा जा रहा है...');
+    _deviceOtpConfirm = await _fbSendPhoneOtp('+91'+mobile, 'recaptcha-container-device', '_fbRecaptchaDevice');
+    const s1=document.getElementById('otpStep1');
+    const s2=document.getElementById('otpStep2');
+    if(s1) s1.style.display='none';
+    if(s2) s2.style.display='block';
+    document.getElementById('otpInput')?.focus();
+    toast('✅ OTP भेज दिया!');
+  }catch(err){
+    console.error('Device OTP send', err);
+    toast('❌ '+_fbOtpErrorMessage(err));
+  }finally{
+    _deviceOtpBusy=false;
+    if(btn){ btn.disabled=false; btn.textContent='📤 OTP भेजें'; }
+  }
+}
+
+async function _verifyDeviceOTP(){
+  if(_deviceOtpBusy) return;
+  const otp=(document.getElementById('otpInput')?.value||'').replace(/\D/g,'').slice(0,6);
+  if(otp.length!==6){ toast('⚠️ 6 अंकों का OTP डालें'); return; }
+  if(!_deviceOtpConfirm){ toast('⚠️ पहले OTP भेजें'); return; }
+  _deviceOtpBusy=true;
+  const btn=document.getElementById('verifyOtpBtn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Verifying…'; }
+  try{
+    await _fbVerifyPhoneOtp(_deviceOtpConfirm, otp);
+    toast('✅ OTP verified!');
+    const emp=_otpEmp;
+    const deviceId=_otpDeviceId || (typeof getDeviceId==='function'?getDeviceId():'');
+    _deviceOtpConfirm=null;
+    // Close overlay
+    const ov=document.getElementById('otpLoginOverlay');
+    if(ov) ov.style.display='none';
+    // Continue same path as approved device login
+    if(typeof doLoginAfterApproval==='function'){
+      await doLoginAfterApproval(emp, null, deviceId);
+    }else if(typeof showSetPasswordScreen==='function'){
+      showSetPasswordScreen(emp, deviceId, true);
+    }else{
+      toast('✅ Verified — continue login');
+    }
+  }catch(err){
+    console.error('Device OTP verify', err);
+    toast('❌ '+_fbOtpErrorMessage(err));
+  }finally{
+    _deviceOtpBusy=false;
+    if(btn){ btn.disabled=false; btn.textContent='✅ Verify करें'; btn.style.opacity='1'; btn.style.pointerEvents='auto'; }
+  }
+}
+
+async function _resendOTP(){
+  if(_otpEmp && document.getElementById('otpLoginOverlay')?.style.display!=='none'){
+    return _sendDeviceOTP(true);
+  }
+  return _sendOTP(true);
+}
+
+function _cancelOTP(){
+  _deviceOtpConfirm=null;
+  _otpEmp=null;
+  _otpDeviceId=null;
+  const ov=document.getElementById('otpLoginOverlay');
+  if(ov) ov.style.display='none';
+}
+
 
 // ── OTP Rate Limiting — Firebase server-side (cannot be bypassed by clearing localStorage) ──
 // [OLD OTP system replaced by Firebase Phone Auth - see _sendOTP above]
@@ -2795,11 +2938,11 @@ function _newRegNameChanged(){ _nrValidate(); }
 
 function showForgotPassword(){ toast('Password reset ke liye Admin se sampark karein: +91-8929394920'); }
 function startWebOtpListener(){}
-function resendOtp(){}
+function resendOtp(){ return _resendOTP(); }
 function checkOtpAutoSubmit(){}
-function cancelOtpFlow(){ try{closeModal();}catch(e){} }
+function cancelOtpFlow(){ try{_cancelOTP();}catch(e){} try{closeModal();}catch(e){} }
 async function confirmPasswordReset(){ try{closeModal();}catch(e){} }
-async function _sendOtpSms(){}
+async function _sendOtpSms(){ return _sendOTP(true); }
 
 
 
@@ -3309,6 +3452,19 @@ function _renderShiftSettingsModal(){
   <div style="font-size:11px;font-weight:800;color:#94a3b8;margin:4px 0 6px">Per machine / section</div>
   <div id="ss_minBySec" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">${_renderMinBySecRows()}</div>
 
+  <div style="font-size:12px;font-weight:800;color:#a78bfa;margin:16px 0 6px">👁 Summary count rows (Schedule)</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.45">Hide daily headcount rows you do not need. Shift cells stay the same — only bottom count rows are hidden.</div>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);cursor:pointer">
+      <input type="checkbox" ${d.hideSummaryDN?'checked':''} onchange="_shiftDraft.hideSummaryDN=this.checked" style="width:18px;height:18px;accent-color:#f59e0b">
+      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#f59e0b">D</b> &amp; <b style="color:#818cf8">N</b> counts</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);cursor:pointer">
+      <input type="checkbox" ${d.hideSummaryABC?'checked':''} onchange="_shiftDraft.hideSummaryABC=this.checked" style="width:18px;height:18px;accent-color:#16a34a">
+      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#16a34a">A</b> / <b style="color:#db2777">B</b> / <b style="color:#0891b2">C</b> counts</span>
+    </label>
+  </div>
+
   <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
   <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
   <button class="cancel-btn" style="margin-top:6px" onclick="_addMachine('metallisers')">+ Metalliser जोड़ें</button>
@@ -3410,6 +3566,8 @@ async function _saveShiftSettings(){
   _shiftDraft.minMet = Number(_shiftDraft.minMet)||0;
   _shiftDraft.minSlit = Number(_shiftDraft.minSlit)||0;
   _shiftDraft.minSup = Number(_shiftDraft.minSup)||0;
+  _shiftDraft.hideSummaryDN = !!_shiftDraft.hideSummaryDN;
+  _shiftDraft.hideSummaryABC = !!_shiftDraft.hideSummaryABC;
   if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
   const ok=await saveShiftConfig(_shiftDraft);
   if(ok){
@@ -5304,7 +5462,14 @@ function renderSchedule(){
   // Threshold warnings: M-1&2 → min 5, S-1&2 → min 3, Supervisor → min 2, ALL → no threshold
   const _thresh = getMinStaffForFilter();
   const summaryStyles = 'font-family:Barlow Condensed,sans-serif;font-weight:900;font-size:13px;text-align:center;padding:4px 2px;';
-  const _cfgShiftsForSummary = _discoverAllShiftCodes(allEmps, getShiftConfigSync().shifts||[{code:'D',label:'Day'},{code:'N',label:'Night'}]);
+  const _cfgFull = getShiftConfigSync();
+  let _cfgShiftsForSummary = _discoverAllShiftCodes(allEmps, _cfgFull.shifts||[{code:'D',label:'Day'},{code:'N',label:'Night'}]);
+  if(_cfgFull.hideSummaryDN){
+    _cfgShiftsForSummary = _cfgShiftsForSummary.filter(s=>!['D','N'].includes(String(s.code||s).toUpperCase()));
+  }
+  if(_cfgFull.hideSummaryABC){
+    _cfgShiftsForSummary = _cfgShiftsForSummary.filter(s=>!['A','B','C'].includes(String(s.code||s).toUpperCase()));
+  }
   const _shiftRowColorMap={
     D:{clr:'#f59e0b',bg:'rgba(245,158,11,.06)',icon:'☀️'},
     N:{clr:'#818cf8',bg:'rgba(129,140,248,.06)',icon:'🌙'},
@@ -5640,9 +5805,9 @@ async function downloadTrendBar(){
     : 'Recent 16 days';
   brandHdr.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px">
-      <img src="vkslogo512.png" crossorigin="anonymous" style="width:46px;height:46px;border-radius:10px;object-fit:cover" onerror="this.style.display='none'"/>
+      <img src="vkslogo512.png" crossorigin="anonymous" alt="VKS Tech" style="width:48px;height:48px;border-radius:12px;object-fit:contain;background:#fff;padding:2px" onerror="this.style.display='none'"/>
       <div>
-        <div style="font-size:22px;font-weight:900;color:#fff;line-height:1.05;letter-spacing:0.3px">VKS Tech</div>
+        <div style="font-size:18px;font-weight:900;color:#fff;line-height:1.15;letter-spacing:0.2px">Made by VKS Tech</div>
         <div style="font-size:11px;color:#94a3b8;font-weight:600">vkstech.com</div>
       </div>
     </div>
@@ -5656,7 +5821,7 @@ async function downloadTrendBar(){
   brandFtr.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.12);font-size:11px;color:#94a3b8;font-weight:600';
   brandFtr.innerHTML = `
     <img src="vkslogo512.png" crossorigin="anonymous" style="width:14px;height:14px;border-radius:3px" onerror="this.style.display='none'"/>
-    <span>Powered by <b style="color:#fff">VKS Tech</b> · vkstech.com · Generated ${new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`;
+    <span>Made by <b style="color:#fff">VKS Tech</b> · vkstech.com · Generated ${new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`;
 
   // Clone the chart box (so we don't disturb the live one)
   const boxClone = box.cloneNode(true);
@@ -7499,9 +7664,9 @@ function renderTeam(search=''){
   _renderDynamicChips('teamFilter', _buildMachineChips('team'), _teamSec, 'setTeamSec');
   document.getElementById('teamAddBtn').innerHTML = isAdminOrMgr()
     ? `<div style="display:flex;gap:8px;margin-bottom:14px">
-        <button class="action-primary" style="flex:1" onclick="openAddEmpForm()">+ नया कर्मचारी जोड़ें</button>
-        <button class="action-primary" style="flex:1;background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="openBulkImportTeam()">📊 Excel से Team Import</button>
-      </div>${SESSION.role==='manager'?`<button class="action-primary" style="width:100%;margin-bottom:14px;background:rgba(244,63,94,.1);color:#f43f5e;border:1px solid rgba(244,63,94,.3)" onclick="startDeleteAllMembersFlow()">🗑️ सभी Members Delete करें (OTP verify)</button>`:''}` : '';
+        <button class="action-primary team-btn-add" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c);color:#fff;border:none;font-weight:900;font-size:14px;padding:14px 12px;border-radius:12px;box-shadow:0 2px 8px rgba(234,88,12,.35)" onclick="openAddEmpForm()">+ नया कर्मचारी जोड़ें</button>
+        <button class="action-primary team-btn-import" style="flex:1;background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;border:none;font-weight:900;font-size:14px;padding:14px 12px;border-radius:12px;box-shadow:0 2px 8px rgba(22,163,74,.35)" onclick="openBulkImportTeam()">📊 Excel से Team Import</button>
+      </div>${SESSION.role==='manager'?`<button class="action-primary team-btn-delete" style="width:100%;margin-bottom:14px;background:linear-gradient(135deg,#e11d48,#be123c);color:#fff;border:none;font-weight:900;font-size:14px;padding:14px 12px;border-radius:12px;box-shadow:0 2px 8px rgba(225,29,72,.3)" onclick="startDeleteAllMembersFlow()">🗑️ सभी Members Delete करें (OTP verify)</button>`:''}` : '';
 
   // Active employees only — those in the shift schedule (have ms array)
   let list = getEmps().filter(e => e.status !== 'resigned' && e.status !== 'left' && Array.isArray(e.ms) && e.ms.length > 0);
@@ -9143,6 +9308,156 @@ async function doPermDelete(id, name){
   toast('🗑️ ' + name + ' का डेटा हमेशा के लिए हटाया');
   renderLeftMembers();
 }
+
+
+// ── Manager: delete ALL team members (OTP verified) ──
+let _deleteAllConfirmResult = null;
+let _deleteAllInProgress = false;
+
+async function startDeleteAllMembersFlow(){
+  if(SESSION.role !== 'manager'){ toast('⚠️ Only Manager can do this'); return; }
+  const team = getEmps().filter(e => e.status !== 'left' && e.status !== 'resigned');
+  if(!team.length){ toast('ℹ️ No team members to delete'); return; }
+
+  const ok = await confirmModal(
+    '⚠️ Delete entire team?',
+    `This will permanently remove <b style="color:#f43f5e">${team.length} members</b> from your team and clear their data from Team list.<br><br>
+     <b>Next step:</b> OTP will be sent to your registered mobile <b>${SESSION.mobile||'—'}</b>.`,
+    '📲 Continue — Send OTP',
+    'Cancel',
+    'big-btn red'
+  );
+  if(!ok) return;
+
+  const mobile = String(SESSION.mobile||'').replace(/\D/g,'');
+  if(mobile.length !== 10){
+    toast('⚠️ Manager mobile not found on profile — cannot send OTP');
+    return;
+  }
+
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">🔐 OTP Verify — Delete All Members</div>
+    <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.5">
+      OTP will be sent to <b style="color:var(--text)">+91-${mobile}</b>. Enter it below to confirm deletion of <b style="color:#f43f5e">${team.length}</b> members.
+    </div>
+    <div id="delAllStatus" style="font-size:12px;color:#f59e0b;margin-bottom:10px">⏳ Sending OTP…</div>
+    <div class="field">
+      <label>OTP (6 digits)</label>
+      <input type="text" id="delAllOtpInput" maxlength="6" inputmode="numeric" placeholder="••••••"
+        style="width:100%;letter-spacing:6px;font-size:20px;font-weight:900;text-align:center"
+        oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6)">
+    </div>
+    <div id="recaptcha-container-delall"></div>
+    <button class="submit-btn" style="margin-top:12px;background:#e11d48" onclick="_confirmDeleteAllWithOtp()">🗑️ Verify OTP & Delete All</button>
+    <button class="cancel-btn" style="margin-top:8px" onclick="_resendDeleteAllOtp()">🔄 Resend OTP</button>
+    <button class="cancel-btn" style="margin-top:8px" onclick="_cancelDeleteAllFlow()">Cancel</button>`);
+
+  try{
+    _deleteAllConfirmResult = await _fbSendPhoneOtp('+91'+mobile, 'recaptcha-container-delall', '_fbRecaptchaDelAll');
+    const st = document.getElementById('delAllStatus');
+    if(st) st.innerHTML = '✅ OTP sent to +91-'+mobile;
+    toast('✅ OTP sent');
+  }catch(err){
+    console.error('Delete-all OTP error', err);
+    const st = document.getElementById('delAllStatus');
+    if(st) st.innerHTML = '❌ '+_fbOtpErrorMessage(err);
+    toast('❌ '+_fbOtpErrorMessage(err));
+  }
+}
+
+async function _resendDeleteAllOtp(){
+  const mobile = String(SESSION.mobile||'').replace(/\D/g,'');
+  if(mobile.length!==10){ toast('⚠️ Manager mobile missing'); return; }
+  const st = document.getElementById('delAllStatus');
+  if(st) st.textContent = '⏳ Resending OTP…';
+  try{
+    _deleteAllConfirmResult = await _fbSendPhoneOtp('+91'+mobile, 'recaptcha-container-delall', '_fbRecaptchaDelAll');
+    if(st) st.innerHTML = '✅ OTP resent to +91-'+mobile;
+    toast('✅ OTP resent');
+  }catch(err){
+    if(st) st.innerHTML = '❌ '+_fbOtpErrorMessage(err);
+    toast('❌ '+_fbOtpErrorMessage(err));
+  }
+}
+
+function _cancelDeleteAllFlow(){
+  _deleteAllConfirmResult = null;
+  try{ if(window._fbRecaptchaDelAll){ window._fbRecaptchaDelAll.clear(); window._fbRecaptchaDelAll=null; } }catch(e){}
+  closeModal();
+}
+
+async function _confirmDeleteAllWithOtp(){
+  if(_deleteAllInProgress) return;
+  const otp = (document.getElementById('delAllOtpInput')?.value||'').trim();
+  if(otp.length !== 6){ toast('⚠️ Enter 6-digit OTP'); return; }
+  if(!_deleteAllConfirmResult){ toast('⚠️ OTP session expired — start again'); return; }
+
+  _deleteAllInProgress = true;
+  const st = document.getElementById('delAllStatus');
+  if(st) st.textContent = '⏳ Verifying OTP…';
+
+  try{
+    await _fbVerifyPhoneOtp(_deleteAllConfirmResult, otp);
+  }catch(err){
+    _deleteAllInProgress = false;
+    console.error(err);
+    const msg = _fbOtpErrorMessage(err);
+    toast('❌ '+msg);
+    if(st) st.textContent = '❌ '+msg;
+    return;
+  }
+
+  // OTP OK — delete all team members owned by this manager
+  if(st) st.textContent = '⏳ Deleting members…';
+  const team = getEmps();
+  let removed = 0, failed = 0;
+  const mgrKey = SESSION.mobile ? _normMobileKey(SESSION.mobile) : '';
+
+  for(const emp of team){
+    try{
+      // safety: only own team
+      if(mgrKey && emp.managerId && emp.managerId !== mgrKey) continue;
+      await fbRemove('employees/'+emp.id);
+      // clear from local cache if present
+      try{
+        if(_cache && _cache.employees && _cache.employees[emp.id]) delete _cache.employees[emp.id];
+      }catch(e){}
+      removed++;
+    }catch(e){
+      failed++;
+      console.error('delete member', emp.id, e);
+    }
+  }
+
+  // Optional: strip schedule entries for deleted emp ids (best-effort)
+  try{
+    const schedules = getSchedules() || {};
+    for(const mk of Object.keys(schedules)){
+      const month = schedules[mk];
+      if(!month || typeof month !== 'object') continue;
+      let changed = false;
+      const copy = { ...month };
+      team.forEach(emp=>{
+        if(copy[emp.id]){ delete copy[emp.id]; changed = true; }
+        if(emp.empId && copy[emp.empId]){ delete copy[emp.empId]; changed = true; }
+      });
+      if(changed){
+        await fbSet('schedules/'+mk, copy);
+        if(_cache && _cache.schedules) _cache.schedules[mk] = copy;
+      }
+    }
+  }catch(e){ console.warn('schedule cleanup', e); }
+
+  _deleteAllConfirmResult = null;
+  _deleteAllInProgress = false;
+  try{ if(window._fbRecaptchaDelAll){ window._fbRecaptchaDelAll.clear(); window._fbRecaptchaDelAll=null; } }catch(e){}
+  closeModal();
+  toast(`🗑️ Deleted ${removed} members` + (failed ? `, ${failed} failed` : ''));
+  try{ renderTeam(); }catch(e){}
+  try{ refreshAll(); }catch(e){}
+  try{ if(typeof renderSchedule==='function') renderSchedule(); }catch(e){}
+}
+
 
 // ════════════════════════════════════════
 // TEAM — EXCEL UPLOAD (Bulk Update)
@@ -12350,9 +12665,9 @@ async function _execPrint(){
   printDiv.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:10px;border-bottom:3px solid #1e293b">
       <div style="display:flex;align-items:center;gap:12px">
-        <img src="vkslogo512.png" crossorigin="anonymous" style="width:48px;height:48px;border-radius:10px;object-fit:cover" onerror="this.style.display='none'"/>
+        <img src="vkslogo512.png" crossorigin="anonymous" alt="VKS Tech" style="width:52px;height:52px;border-radius:12px;object-fit:contain;background:#fff;border:1px solid #e2e8f0;padding:2px" onerror="this.style.display='none'"/>
         <div>
-          <div style="font-size:22px;font-weight:900;color:#1e293b;line-height:1.05;letter-spacing:0.3px">VKS Tech</div>
+          <div style="font-size:18px;font-weight:900;color:#1e293b;line-height:1.15;letter-spacing:0.2px">Made by VKS Tech</div>
           <div style="font-size:10px;color:#64748b;font-weight:600">vkstech.com</div>
         </div>
       </div>
@@ -12375,8 +12690,8 @@ async function _execPrint(){
     </table>
     <div style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px;padding-top:6px;border-top:2px solid #e2e8f0">${legendHtml}</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10px;color:#64748b;font-weight:600">
-      <img src="vkslogo512.png" crossorigin="anonymous" style="width:14px;height:14px;border-radius:3px" onerror="this.style.display='none'"/>
-      <span>Powered by <b style="color:#1e293b">VKS Tech</b> · vkstech.com</span>
+      <img src="vkslogo512.png" crossorigin="anonymous" alt="VKS Tech" style="width:16px;height:16px;border-radius:4px;object-fit:contain" onerror="this.style.display='none'"/>
+      <span>Made by <b style="color:#1e293b">VKS Tech</b> · vkstech.com</span>
     </div>`;
 
   document.body.appendChild(printDiv);
