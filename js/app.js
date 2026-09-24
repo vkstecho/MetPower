@@ -1675,18 +1675,35 @@ function _onOtpInput(val){
 
 async function _sendOTP(isResend){
   const mobileEl=document.getElementById('loginMobile');
-  const mobile=(mobileEl?.value||'').trim();
+  const mobile=(mobileEl?.value||'').trim().replace(/\D/g,'');
   if(mobile.length!==10){ toast('⚠️ 10 अंकों का Mobile Number डालें'); return; }
   const fullPhone='+91'+mobile;
   _loginMobile=fullPhone;
   const errEl=document.getElementById('loginErr');
   if(errEl) errEl.textContent='';
   try{
-    if(!window._fbRecaptchaNew||isResend){
-      window._fbRecaptchaNew=new window._fbRecaptchaVerifierClass(window._fbAuth,'recaptcha-container',{size:'invisible'});
+    if(!window._fbAuth || !window._fbRecaptchaVerifierClass || !window._fbSignInWithPhoneNumber){
+      throw new Error('Firebase Auth अभी ready नहीं है — 2 सेकंड बाद फिर try करें');
     }
+    // Ensure reCAPTCHA host element exists (required by Firebase Phone Auth)
+    let rc = document.getElementById('recaptcha-container');
+    if(!rc){
+      rc = document.createElement('div');
+      rc.id = 'recaptcha-container';
+      document.body.prepend(rc);
+    }
+    // Always rebuild verifier on resend or if previous attempt failed
+    if(window._fbRecaptchaNew){
+      try{ window._fbRecaptchaNew.clear(); }catch(e){}
+      window._fbRecaptchaNew = null;
+    }
+    window._fbRecaptchaNew = new window._fbRecaptchaVerifierClass(
+      window._fbAuth,
+      'recaptcha-container',
+      { size:'invisible', callback:()=>{}, 'expired-callback':()=>{ window._fbRecaptchaNew=null; } }
+    );
     toast('OTP भेजा जा रहा है...');
-    _loginConfirmResult=await window._fbSignInWithPhoneNumber(window._fbAuth,fullPhone,window._fbRecaptchaNew);
+    _loginConfirmResult = await window._fbSignInWithPhoneNumber(window._fbAuth, fullPhone, window._fbRecaptchaNew);
     showStep(2);
     const sentEl=document.getElementById('otpSentTo');
     if(sentEl) sentEl.textContent='+91-'+mobile+' पर OTP भेजा गया';
