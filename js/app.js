@@ -2598,56 +2598,103 @@ function _forgotPw(empId, empName){
 // ════════════════════════════════════════
 // SHARED FIREBASE PHONE OTP
 // ════════════════════════════════════════
-/** Ensure Auth + Recaptcha + Phone APIs are available */
 function _fbPhoneAuthReady(){
   return !!(window._fbAuth && window._fbRecaptchaVerifierClass && window._fbSignInWithPhoneNumber);
 }
 
-/** Build / rebuild invisible Recaptcha on a container element id */
-function _fbMakeRecaptcha(containerId, storeKey){
-  const key = storeKey || ('_fbRc_' + containerId);
-  try{
-    if(window[key]){ try{ window[key].clear(); }catch(e){} window[key]=null; }
-  }catch(e){}
+function _fbEnsureRecaptchaHost(containerId){
   let el = document.getElementById(containerId);
   if(!el){
     el = document.createElement('div');
     el.id = containerId;
-    el.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none';
     document.body.appendChild(el);
-  } else {
-    el.innerHTML = '';
   }
-  window[key] = new window._fbRecaptchaVerifierClass(
-    window._fbAuth,
-    containerId,
-    {
-      size: 'invisible',
-      callback: ()=>{},
-      'expired-callback': ()=>{ try{ window[key]=null; }catch(e){} }
+  // Visible fallback container sits near bottom-center if needed
+  el.innerHTML = '';
+  el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100000;min-width:1px;min-height:1px';
+  return el;
+}
+
+function _fbClearRecaptcha(storeKey){
+  try{
+    if(window[storeKey]){
+      try{ window[storeKey].clear(); }catch(e){}
+      window[storeKey] = null;
     }
-  );
-  return window[key];
+  }catch(e){}
 }
 
 /**
- * Send OTP to E.164 phone (e.g. +9198xxxxxxxx).
- * Returns Firebase ConfirmationResult or throws.
+ * Create RecaptchaVerifier. size: 'invisible' | 'normal'
+ * Always clears previous instance first.
+ */
+async function _fbMakeRecaptcha(containerId, storeKey, size){
+  _fbClearRecaptcha(storeKey);
+  _fbEnsureRecaptchaHost(containerId);
+  const params = {
+    size: size || 'invisible',
+    callback: ()=>{},
+    'expired-callback': ()=>{ try{ window[storeKey]=null; }catch(e){} }
+  };
+  const verifier = new window._fbRecaptchaVerifierClass(window._fbAuth, containerId, params);
+  window[storeKey] = verifier;
+  // render() is required for reliable phone auth on web
+  try{
+    if(typeof verifier.render === 'function'){
+      await verifier.render();
+    }
+  }catch(e){
+    console.warn('[recaptcha render]', e);
+  }
+  return verifier;
+}
+
+/**
+ * Send OTP to E.164 phone. Tries invisible reCAPTCHA, then visible fallback.
+ * Clears any existing Firebase Auth session first (avoids auth/internal-error).
  */
 async function _fbSendPhoneOtp(e164Phone, containerId, storeKey){
   if(!_fbPhoneAuthReady()){
     throw new Error('Firebase Auth not ready — wait 2 seconds and try again');
   }
   const phone = String(e164Phone||'').trim();
-  if(!/^\+91\d{10}$/.test(phone) && !/^\+\d{10,15}$/.test(phone)){
+  if(!/^\+\d{10,15}$/.test(phone)){
     throw new Error('Invalid phone number');
   }
-  const verifier = _fbMakeRecaptcha(containerId || 'recaptcha-container', storeKey || '_fbRecaptchaNew');
-  const confirmation = await window._fbSignInWithPhoneNumber(window._fbAuth, phone, verifier);
-  return confirmation;
+
+  // Stale signed-in session often causes auth/internal-error on phone login
+  try{
+    if(window._fbAuth && window._fbAuth.currentUser && window._fbSignOut){
+      await window._fbSignOut();
+    }
+  }catch(e){ console.warn('[otp] signOut before phone', e); }
+
+  const cid = containerId || 'recaptcha-container';
+  const key = storeKey || '_fbRecaptchaNew';
+
+  // Attempt 1: invisible
+  try{
+    const verifier = await _fbMakeRecaptcha(cid, key, 'invisible');
+    const confirmation = await window._fbSignInWithPhoneNumber(window._fbAuth, phone, verifier);
+    return confirmation;
+  }catch(err1){
+    console.warn('[otp] invisible failed', err1 && (err1.code||err1.message));
+    _fbClearRecaptcha(key);
+
+    // Attempt 2: visible checkbox (more reliable when invisible/internal-error)
+    try{
+      toast('🔐 Complete the security check…');
+      const verifier2 = await _fbMakeRecaptcha(cid, key, 'normal');
+      const confirmation2 = await window._fbSignInWithPhoneNumber(window._fbAuth, phone, verifier2);
+      return confirmation2;
+    }catch(err2){
+      console.error('[otp] visible also failed', err2);
+      _fbClearRecaptcha(key);
+      throw err2;
+    }
+  }
 }
 
-/** Verify 6-digit code against a ConfirmationResult */
 async function _fbVerifyPhoneOtp(confirmationResult, code){
   const otp = String(code||'').replace(/\D/g,'').slice(0,6);
   if(otp.length !== 6) throw new Error('Enter 6-digit OTP');
@@ -2658,16 +2705,26 @@ async function _fbVerifyPhoneOtp(confirmationResult, code){
 }
 
 function _fbOtpErrorMessage(err){
-  const code = err && (err.code || '');
+  const code = (err && err.code) || '';
   const msg = (err && err.message) || String(err||'');
   if(code === 'auth/invalid-verification-code') return 'Wrong OTP — check SMS and try again';
   if(code === 'auth/code-expired') return 'OTP expired — request a new one';
-  if(code === 'auth/too-many-requests') return 'Too many attempts — wait and try later';
+  if(code === 'auth/too-many-requests') return 'Too many attempts — wait a few minutes';
   if(code === 'auth/network-request-failed') return 'Network error — check internet';
-  if(code === 'auth/captcha-check-failed') return 'Captcha failed — reload page and retry';
+  if(code === 'auth/captcha-check-failed') return 'Security check failed — reload page and retry';
   if(code === 'auth/invalid-phone-number') return 'Invalid mobile number';
+  if(code === 'auth/missing-phone-number') return 'Enter mobile number';
+  if(code === 'auth/quota-exceeded') return 'SMS quota exceeded — try later or enable billing in Firebase';
+  if(code === 'auth/billing-not-enabled') return 'Firebase billing not enabled for SMS OTP';
+  if(code === 'auth/operation-not-allowed') return 'Phone login disabled in Firebase Console';
+  if(code === 'auth/internal-error'){
+    return 'OTP service error (auth/internal-error). Check: Phone Auth ON, domain authorized, billing/SMS enabled. Then reload page.';
+  }
   if(/Firebase Auth not ready/i.test(msg)) return msg;
-  return msg || 'OTP failed';
+  // Strip long Firebase: Error (...) wrappers for toast
+  const m = msg.match(/auth\/[a-z0-9-]+/i);
+  if(m) return 'OTP error ('+m[0]+') — reload and try again';
+  return msg.slice(0,120) || 'OTP failed';
 }
 
 // ════════════════════════════════════════

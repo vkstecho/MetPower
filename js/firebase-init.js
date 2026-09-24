@@ -57,18 +57,28 @@
     // ── Phone OTP Auth ──
     window._fbSendOTP = async function(phoneNumber){
       try{
-        // Create invisible recaptcha (required by Firebase)
-        if(!window._fbRecaptcha){
-          window._fbRecaptcha = new RecaptchaVerifier(auth, 'recaptcha-container', {
-            size: 'invisible',
-            callback: ()=>{},
-            'expired-callback': ()=>{ window._fbRecaptcha = null; }
-          });
+        // Prefer app.js helper if loaded
+        if(typeof window._fbSendPhoneOtp === 'function'){
+          const confirmResult = await window._fbSendPhoneOtp(phoneNumber, 'recaptcha-container', '_fbRecaptcha');
+          window._fbConfirmOTP = (code) => confirmResult.confirm(code);
+          return { success: true };
         }
+        try{ if(auth.currentUser) await signOut(auth); }catch(e){}
+        if(window._fbRecaptcha){ try{ window._fbRecaptcha.clear(); }catch(e){} window._fbRecaptcha=null; }
+        let host = document.getElementById('recaptcha-container');
+        if(!host){ host=document.createElement('div'); host.id='recaptcha-container'; document.body.appendChild(host); }
+        host.innerHTML='';
+        window._fbRecaptcha = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: ()=>{},
+          'expired-callback': ()=>{ window._fbRecaptcha = null; }
+        });
+        try{ if(window._fbRecaptcha.render) await window._fbRecaptcha.render(); }catch(e){}
         const confirmResult = await signInWithPhoneNumber(auth, phoneNumber, window._fbRecaptcha);
         window._fbConfirmOTP = (code) => confirmResult.confirm(code);
         return { success: true };
       }catch(e){
+        try{ if(window._fbRecaptcha){ window._fbRecaptcha.clear(); } }catch(x){}
         window._fbRecaptcha = null;
         return { success: false, error: e.message, code: e.code };
       }
