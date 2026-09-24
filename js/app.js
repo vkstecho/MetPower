@@ -11121,11 +11121,12 @@ async function loadScheduleBuilder(){
     return getEmpDisplayOrder(a) - getEmpDisplayOrder(b);
   });
 
-  // Build grid
+  // Build grid — date header is a SEPARATE sticky row (table thead sticky breaks under overflow-x)
   const headerDays = dayNums.map(d=>{
     const dt = new Date(yr, mo-1, d);
     const dow = ['S','M','T','W','T','F','S'][dt.getDay()];
-    return `<th style="min-width:32px;font-size:10px;padding:3px 2px;background:#1e293b;color:${dt.getDay()===0?'#f87171':'#94a3b8'};position:sticky;top:0;z-index:2">${d}<br><span style="font-size:9px">${dow}</span></th>`;
+    const sun = dt.getDay()===0;
+    return `<div data-sb-date-col="${d}" style="flex:0 0 32px;width:32px;min-width:32px;text-align:center;padding:4px 2px;font-size:10px;font-weight:800;color:${sun?'#f87171':'#94a3b8'};line-height:1.15">${d}<br><span style="font-size:9px;font-weight:700">${dow}</span></div>`;
   }).join('');
 
   const rows = emps.map((emp,rowIdx) => {
@@ -11206,12 +11207,15 @@ async function loadScheduleBuilder(){
       </div>
     </div>
     <div id="sbToolbar" style="display:none"></div>
-    <div style="overflow-x:auto;margin-bottom:14px;border-radius:8px;border:1px solid var(--border2)">
-      <table style="border-collapse:collapse;width:100%">
-        <thead><tr>
-          <th id="sbCornerHeader" style="position:sticky;left:0;top:0;z-index:3;background:#1e293b;padding:4px 8px;font-size:11px;color:#94a3b8;text-align:left;min-width:90px">कर्मचारी</th>
-          ${headerDays}
-        </tr></thead>
+    <!-- Sticky date/day header (synced horizontal scroll with body) -->
+    <div id="sbDateHdrWrap" style="position:sticky;z-index:8;background:var(--bg);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;border:1px solid var(--border2);border-bottom:none;border-radius:8px 8px 0 0">
+      <div id="sbDateHdr" style="display:flex;align-items:stretch;background:#1e293b;min-width:max-content">
+        <div id="sbCornerHeader" style="position:sticky;left:0;z-index:4;flex:0 0 90px;width:90px;min-width:90px;padding:6px 8px;font-size:11px;font-weight:800;color:#94a3b8;background:#1e293b;display:flex;align-items:center;box-shadow:2px 0 6px rgba(0,0,0,.35)">कर्मचारी</div>
+        ${headerDays}
+      </div>
+    </div>
+    <div id="sbBodyScroll" style="overflow-x:auto;margin-bottom:14px;border:1px solid var(--border2);border-top:none;border-radius:0 0 8px 8px">
+      <table style="border-collapse:collapse;width:max-content;min-width:100%">
         <tbody id="sb_tbody">${rows}</tbody>
       </table>
     </div>
@@ -11221,6 +11225,7 @@ async function loadScheduleBuilder(){
     </div>`);
   setTimeout(initSBSelection, 50);
   setTimeout(_sbPositionStickyTableHeader, 60);
+  setTimeout(_sbSyncDateHdrScroll, 70);
   }catch(err){console.error('loadScheduleBuilder error:',err);toast('❌ Error: '+err.message);}
 }
 
@@ -11261,20 +11266,44 @@ function _sbSetCellValue(cell, val){
 function _sbPositionStickyTableHeader(){
   const headerEl=document.getElementById('sbStickyHeader');
   const toolbarEl=document.getElementById('sbToolbar');
-  const tbody=document.getElementById('sb_tbody');
-  if(!headerEl || !tbody) return;
-  const headerH=headerEl.offsetHeight;
+  const dateHdrWrap=document.getElementById('sbDateHdrWrap');
+  if(!headerEl) return;
+  const headerH=headerEl.offsetHeight || 0;
   if(toolbarEl){
     toolbarEl.style.position='sticky';
     toolbarEl.style.top=headerH+'px';
     toolbarEl.style.zIndex='9';
     toolbarEl.style.background='var(--bg)';
   }
-  const toolbarH = (toolbarEl && toolbarEl.style.display!=='none') ? toolbarEl.offsetHeight : 0;
-  const thead=tbody.closest('table')?.querySelector('thead');
-  if(!thead) return;
-  const totalOffset = headerH + toolbarH;
-  thead.querySelectorAll('th').forEach(th=>{ th.style.top=totalOffset+'px'; });
+  const toolbarVisible = toolbarEl && toolbarEl.style.display!=='none' && toolbarEl.offsetHeight>0;
+  const toolbarH = toolbarVisible ? toolbarEl.offsetHeight : 0;
+  // Date/day row sticks just under title + selection toolbar
+  if(dateHdrWrap){
+    dateHdrWrap.style.position='sticky';
+    dateHdrWrap.style.top=(headerH + toolbarH)+'px';
+    dateHdrWrap.style.zIndex='8';
+  }
+}
+
+function _sbSyncDateHdrScroll(){
+  const hdr = document.getElementById('sbDateHdrWrap');
+  const body = document.getElementById('sbBodyScroll');
+  if(!hdr || !body) return;
+  // hide duplicate scrollbar on header
+  hdr.style.scrollbarWidth = 'none';
+  if(hdr._sbSyncBound) return;
+  hdr._sbSyncBound = true;
+  let lock = false;
+  body.addEventListener('scroll', ()=>{
+    if(lock) return; lock = true;
+    hdr.scrollLeft = body.scrollLeft;
+    lock = false;
+  }, {passive:true});
+  hdr.addEventListener('scroll', ()=>{
+    if(lock) return; lock = true;
+    body.scrollLeft = hdr.scrollLeft;
+    lock = false;
+  }, {passive:true});
 }
 
 function initSBSelection(){
