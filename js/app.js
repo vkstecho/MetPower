@@ -9070,33 +9070,72 @@ async function confirmBulkImportTeam(){
 function _buildSecOptions(selectedSec){
   const cfg=getShiftConfigSync();
   const opts=[];
+  // Sections based on Machines: Metalliser (M1/M2), Slitters (S1/S2/...), Engineers (SUP), Manager
   (cfg.metallisers||[]).forEach(m=>opts.push(`<option value="${m}"${selectedSec===m?' selected':''}>${secName(m)||m}</option>`));
   (cfg.slitters||[]).forEach(s=>opts.push(`<option value="${s}"${selectedSec===s?' selected':''}>${secName(s)||s}</option>`));
-  opts.push(`<option value="SUP"${selectedSec==='SUP'?' selected':''}>${secName('SUP')||'Supervisor'}</option>`);
+  opts.push(`<option value="SUP"${selectedSec==='SUP'?' selected':''}>${secName('SUP')||'Engineers / Supervisor'}</option>`);
   opts.push(`<option value="MGR"${selectedSec==='MGR'?' selected':''}>${secName('MGR')||'Manager'}</option>`);
   return opts.join('');
 }
+function _buildMachineOptions(selectedMc){
+  const cfg=getShiftConfigSync();
+  const machines=new Set();
+  (cfg.metallisers||[]).forEach(m=>{
+    const label=secName(m)||m;
+    // e.g. M1 → M-1, also keep raw
+    machines.add(m.replace(/^M(\d)$/i,'M-$1'));
+    machines.add(m);
+    if(/^M/i.test(m)) machines.add('Metalliser');
+  });
+  (cfg.slitters||[]).forEach(s=>{
+    machines.add(s.replace(/^S(\d)$/i,'S-$1'));
+    machines.add(s);
+  });
+  // Common fixed options
+  ['M-1','M-2','Metalliser','S-1','S-2','S-3','S-4','S.I.','ENGG'].forEach(x=>machines.add(x));
+  const sorted=[...machines].sort((a,b)=>String(a).localeCompare(String(b)));
+  return sorted.map(m=>`<option value="${m}"${selectedMc===m?' selected':''}>${m}</option>`).join('');
+}
+function _buildDesignationOptions(selected){
+  const list=['Operator','Ass. Operator','Team Member','Sr. Team Member','Jr. Team Member','Trainee','Engineer','Jr. Engineer','Officer','Supervisor','Sr. Supervisor','Manager','Shift Engineer','Admin'];
+  return list.map(r=>`<option value="${r}"${selected===r?' selected':''}>${r}</option>`).join('');
+}
+function _buildRespOptions(selected){
+  const list=['Operation','Assistant','Trainee','Engineer','Manager','Setup','5S','P,Q,M','Quality','Maintenance'];
+  return list.map(r=>`<option value="${r}"${selected===r?' selected':''}>${r}</option>`).join('');
+}
 function openAddEmpForm(){
   const secOpts=_buildSecOptions(null);
+  const mcOpts=_buildMachineOptions(null);
+  const desigOpts=_buildDesignationOptions('Team Member');
+  const respOpts=_buildRespOptions('Operation');
   openModal(`<div class="modal-handle"></div>
-  <div class="modal-title">👤 नया कर्मचारी</div>
+  <div class="modal-title">👤 ${typeof t==='function'?t('नया कर्मचारी'):'New Employee'}</div>
   <div class="grid2">
-    <div class="field"><label>नाम</label><input class="inp-field" id="ne_name" placeholder="FULL NAME" oninput="this.value=this.value.toUpperCase()"></div>
-    <div class="field"><label>Employee Code</label><input class="inp-field" id="ne_code" placeholder="30000XXX"></div>
+    <div class="field"><label>${typeof t==='function'?t('नाम'):'Name'}</label><input class="inp-field" id="ne_name" placeholder="FULL NAME" oninput="this.value=this.value.toUpperCase()"></div>
+    <div class="field"><label>Employee Code / ID</label><input class="inp-field" id="ne_code" placeholder="30000XXX"></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>सेक्शन</label><select id="ne_sec">${secOpts}</select></div>
-    <div class="field"><label>मशीन</label><input class="inp-field" id="ne_mc" placeholder="M-1"></div>
+    <div class="field"><label>Designation</label><select id="ne_designation">${desigOpts}</select></div>
+    <div class="field"><label>${typeof t==='function'?t('सेक्शन'):'Section'}</label><select id="ne_sec">${secOpts}</select></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>ज़िम्मेदारी</label><input class="inp-field" id="ne_resp" placeholder="Operation"></div>
+    <div class="field"><label>${typeof t==='function'?t('मशीन'):'Machine'}</label><select id="ne_mc">${mcOpts}</select></div>
+    <div class="field"><label>${typeof t==='function'?t('ज़िम्मेदारी'):'Responsibility'}</label><select id="ne_resp">${respOpts}</select></div>
+  </div>
+  <div class="grid2">
     <div class="field"><label>Week Off</label>
       <select id="ne_woff"><option>MON</option><option>TUE</option><option>WED</option><option>THU</option><option>FRI</option><option>SAT</option><option>SUN</option></select>
     </div>
+    <div class="field"><label>📱 ${typeof t==='function'?t('मोबाइल नंबर'):'Mobile'} (SMS)</label><input class="inp-field" id="ne_phone" placeholder="10-digit number" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
   </div>
-  <div class="field"><label>📱 मोबाइल नंबर (SMS के लिए)</label><input class="inp-field" id="ne_phone" placeholder="10 अंक का नंबर" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
-  <button class="submit-btn" onclick="addEmployee()">✅ जोड़ें</button>
-  <button class="cancel-btn" onclick="closeModal()">रद्द करें</button>`);
+  <div class="grid2">
+    <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ne_joining" type="date"></div>
+    <div class="field"><label>🎂 Date of Birth</label><input class="inp-field" id="ne_dob" type="date"></div>
+  </div>
+  <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ne_salary" type="number" min="0" step="1" placeholder="e.g. 15000"></div>
+  <button class="submit-btn" onclick="addEmployee()">✅ ${typeof t==='function'?t('जोड़ें'):'Add'}</button>
+  <button class="cancel-btn" onclick="closeModal()">${typeof t==='function'?t('रद्द करें'):'Cancel'}</button>`);
 }
 
 async function addEmployee(){
@@ -9107,16 +9146,24 @@ async function addEmployee(){
   const resp=document.getElementById('ne_resp').value.trim();
   const woff=document.getElementById('ne_woff').value;
   const phone=document.getElementById('ne_phone').value.trim();
+  const designation=document.getElementById('ne_designation')?.value||'';
+  const joiningDate=document.getElementById('ne_joining')?.value?.trim()||'';
+  const dob=document.getElementById('ne_dob')?.value?.trim()||'';
+  const salaryRaw=document.getElementById('ne_salary')?.value?.trim();
   if(!name||!code){ toast('नाम और कोड जरूरी है'); return; }
   // Only Admin can add Manager-section employees
   if(sec==='MGR' && !isAdmin()){ toast('❌ Manager section में सिर्फ Admin जोड़ सकते हैं'); return; }
   const id='e'+Date.now().toString(36);
   const emp={id,name,empId:code,sec,mc,resp,woff,status:'active',
+    designation,
     companyId:myCompanyId()==='ALL'?'gls':myCompanyId(),
     companyLabel:SESSION.company||'GLS',
     ms:Array(31).fill('D')};
   if(SESSION.role==='manager' && SESSION.mobile){ emp.managerId=_normMobileKey(SESSION.mobile); }
   if(phone) emp.phone=phone;
+  if(joiningDate) emp.joiningDate=joiningDate;
+  if(dob) emp.dob=dob;
+  if(salaryRaw) emp.monthlySalary=parseFloat(salaryRaw);
   await fbUpdate(`employees/${id}`,emp);
   closeModal(); toast(`✅ ${name} जोड़ा गया`);
 }
@@ -9124,35 +9171,43 @@ async function addEmployee(){
 function openEditEmpForm(empId){
   const e=getEmps().find(x=>x.id===empId); if(!e) return;
   const secOpts=_buildSecOptions(e.sec);
-  const roleOpts=['Team Member','Sr. Team Member','Jr. Team Member','Trainee','Supervisor','Manager','Admin'].map(r=>`<option${(e.designation||'')=== r?' selected':''}>${r}</option>`).join('');
+  const mcOpts=_buildMachineOptions(e.mc||'');
+  const desigOpts=_buildDesignationOptions(e.designation||'');
+  const respOpts=_buildRespOptions(e.resp||'');
+  // Ensure current free-text machine/resp appear in dropdown if not in list
+  let mcExtra='';
+  if(e.mc && !mcOpts.includes(`value="${e.mc}"`)) mcExtra=`<option value="${e.mc}" selected>${e.mc}</option>`;
+  let respExtra='';
+  if(e.resp && !respOpts.includes(`value="${e.resp}"`)) respExtra=`<option value="${e.resp}" selected>${e.resp}</option>`;
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">✏️ ${e.name} संपादित करें</div>
   <div class="grid2">
     <div class="field"><label>नाम</label><input class="inp-field" id="ee_name" value="${e.name}"></div>
-    <div class="field"><label>Employee Code</label><input class="inp-field" id="ee_code" value="${e.empId||''}"></div>
+    <div class="field"><label>Employee Code / ID</label><input class="inp-field" id="ee_code" value="${e.empId||''}"></div>
   </div>
   <div class="grid2">
+    <div class="field"><label>Designation</label><select id="ee_designation">${desigOpts}</select></div>
     <div class="field"><label>सेक्शन</label><select id="ee_sec">${secOpts}</select></div>
-    <div class="field"><label>मशीन</label><input class="inp-field" id="ee_mc" value="${e.mc||''}"></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>ज़िम्मेदारी</label><input class="inp-field" id="ee_resp" value="${e.resp||''}"></div>
+    <div class="field"><label>मशीन</label><select id="ee_mc">${mcExtra}${mcOpts}</select></div>
+    <div class="field"><label>ज़िम्मेदारी</label><select id="ee_resp">${respExtra}${respOpts}</select></div>
+  </div>
+  <div class="grid2">
     <div class="field"><label>Week Off</label>
       <select id="ee_woff"><option${e.woff==='MON'?' selected':''}>MON</option><option${e.woff==='TUE'?' selected':''}>TUE</option><option${e.woff==='WED'?' selected':''}>WED</option><option${e.woff==='THU'?' selected':''}>THU</option><option${e.woff==='FRI'?' selected':''}>FRI</option><option${e.woff==='SAT'?' selected':''}>SAT</option><option${e.woff==='SUN'?' selected':''}>SUN</option></select>
     </div>
+    <div class="field"><label>📱 मोबाइल नंबर</label><input class="inp-field" id="ee_phone" value="${e.phone||''}" placeholder="10 अंक का नंबर" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>Designation / Role</label>
-      <select id="ee_designation">${roleOpts}</select>
-    </div>
+    <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ee_joining" type="date" value="${e.joiningDate||''}"></div>
+    <div class="field"><label>🎂 Date of Birth</label><input class="inp-field" id="ee_dob" type="date" value="${e.dob||''}"></div>
+  </div>
+  <div class="grid2">
+    <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ee_salary" type="number" value="${e.monthlySalary||''}" placeholder="e.g. 15000"></div>
     <div class="field"><label>स्थिति</label>
       <select id="ee_status"><option value="active"${e.status==='active'?' selected':''}>✅ Active</option><option value="resigned"${e.status==='resigned'?' selected':''}>🚪 Resigned</option></select>
     </div>
-  </div>
-  <div class="field"><label>📱 मोबाइल नंबर</label><input class="inp-field" id="ee_phone" value="${e.phone||''}" placeholder="10 अंक का नंबर" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
-  <div class="grid2">
-    <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ee_joining" type="date" value="${e.joiningDate||''}"></div>
-    <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ee_salary" type="number" value="${e.monthlySalary||''}" placeholder="e.g. 15000"></div>
   </div>
   <div class="field"><label>🔐 App Access Level</label>
     <select id="ee_accessLevel">
@@ -9185,9 +9240,12 @@ async function saveEmployee(empId){
   // Manager cannot move employee to MGR section
   if(!isAdmin() && update.sec==='MGR'){ toast('❌ Manager section में सिर्फ Admin जोड़ सकते हैं'); return; }
   const joining = document.getElementById('ee_joining')?.value?.trim();
+  const dob     = document.getElementById('ee_dob')?.value?.trim();
   const salary  = document.getElementById('ee_salary')?.value?.trim();
   if(joining) update.joiningDate   = joining;
+  if(dob)     update.dob           = dob;
   if(salary)  update.monthlySalary = parseFloat(salary);
+  else if(salary==='') update.monthlySalary = null;
   await fbUpdate(`employees/${empId}`, update);
   closeModal(); toast('✅ जानकारी अपडेट हो गई');
 }
