@@ -1,6 +1,6 @@
 # MET Power — Manpower Management System
 
-GLS Polyfilms metalliser department app (Firebase + PWA-ready).
+MET Power metalliser department app (Firebase + PWA-ready).
 
 ## Folder structure (upload these to GitHub)
 

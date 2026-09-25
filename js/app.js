@@ -231,7 +231,7 @@ async function openEmpReorderPanel(){
 
   const emps = getEmps().filter(e => e.status !== 'resigned');
 
-  // ── Fallback: any employee whose sec isn't one of GLS's fixed codes above ──
+  // ── Fallback: any employee whose sec isn't one of fixed codes above ──
   const _coveredSecs = new Set(['M1','M2','S1','S2','SUP','MGR']);
   const _extraSecs = Array.from(new Set(emps.map(e=>e.sec).filter(s=>s && !_coveredSecs.has(s))));
   _extraSecs.forEach(secVal=>{
@@ -866,7 +866,7 @@ function _normCompanyId(s){ return (s||'').toString().trim().toLowerCase() || 'g
 function myCompanyId(){
   if(isAdmin()) return SESSION.viewCompanyId || 'ALL';
   if(SESSION.companyId) return SESSION.companyId;
-  return 'gls'; // legacy employee-code workers/managers/supervisors — all pre-existing GLS staff
+  return 'gls'; // legacy employee-code workers/managers/supervisors — all pre-existing MET Power staff
 }
 function listAllCompanies(){
   const ids=new Set();
@@ -874,7 +874,7 @@ function listAllCompanies(){
   (_cache.employees||[]).forEach(e=>{
     const cid=_normCompanyId(e.companyId);
     ids.add(cid);
-    if(!labels[cid]) labels[cid]=e.companyLabel||(cid==='gls'?'GLS':cid.toUpperCase());
+    if(!labels[cid]) labels[cid]=e.companyLabel||(cid==='gls'?'MET Power':cid.toUpperCase());
   });
   return Array.from(ids).map(cid=>({id:cid,label:labels[cid]||cid.toUpperCase()})).sort((a,b)=>a.label.localeCompare(b.label));
 }
@@ -944,7 +944,7 @@ function _findPhoneConflict(phone, excludeEmpId, excludeEmpCode){
   return null;
 }
 // ════════════════════════════════════════
-// SHIFT & MACHINE CONFIGURATION (per-Manager, GLS included)
+// SHIFT & MACHINE CONFIGURATION (per-Manager, MET Power included)
 // ════════════════════════════════════════
 function myShiftConfigKey(companyIdOverride){
   if(isAdmin()){
@@ -1035,8 +1035,8 @@ function warmShiftConfigCache(){
 function getSchedFilteredEmps(){
   const all=getEmps();
   if(schedSec==='ALL') return all;
-  if(schedSec==='M12') return all.filter(e=>e.sec==='M1'||e.sec==='M2'); // legacy GLS grouped chip
-  if(schedSec==='S12') return all.filter(e=>e.sec==='S1'||e.sec==='S2'); // legacy GLS grouped chip
+  if(schedSec==='M12') return all.filter(e=>e.sec==='M1'||e.sec==='M2'); // legacy MET Power grouped chip
+  if(schedSec==='S12') return all.filter(e=>e.sec==='S1'||e.sec==='S2'); // legacy MET Power grouped chip
   if(schedSec==='GRP:supervisor'){
     return all.filter(e=>{ const k=_normSecKey(e.sec); return k==='SUP'||k==='ALL'; });
   }
@@ -1894,7 +1894,7 @@ let _step3Dept    = '';
 
 const COMPANY_INFO = {
   // Page 1 — Top 5
-  GLS:        { ico:'🏭', label:'GLS Group',    sub:'Polyfilms',     color:'#f97316', page:1 },
+  METPOWER:   { ico:'🏭', label:'MET Power',    sub:'Polyfilms',     color:'#f97316', page:1 },
   UFLEX:      { ico:'📦', label:'UFlex',         sub:'Noida',         color:'#38bdf8', page:1 },
   JINDAL:     { ico:'🎞️', label:'Jindal',        sub:'Poly Films',    color:'#a3e635', page:1 },
   CHIRIPAL:   { ico:'🏬', label:'Chiripal',      sub:'Poly Films',    color:'#e879f9', page:1 },
@@ -2248,7 +2248,7 @@ function onCodeInput(val){
     const match=getEmps().find(e=>e.empId&&e.empId.trim().toUpperCase()===val.toUpperCase());
     if(hint){
       if(match)
-        hint.innerHTML='<span style="color:var(--green)">✅ '+match.name+' — '+(secName(match.sec)||'GLS')+'</span>';
+        hint.innerHTML='<span style="color:var(--green)">✅ '+match.name+' — '+(secName(match.sec)||'MET Power')+'</span>';
       else
         hint.innerHTML='<span style="color:#f97316">🔆 नया Employee — Registration होगा</span>';
     }
@@ -2369,7 +2369,7 @@ async function proceedFromCode(){
   const code=(document.getElementById('wCode')?.value||'').trim().toUpperCase();
   if(!code||code.length<3){ showLoginErrStep(2,'Employee Code डालें (कम से कम 3 characters)'); return; }
   _step1Code=code;
-  _step1Company='GLS';
+  _step1Company='MET Power';
 
   const btn=document.getElementById('step2Btn');
   if(btn){ btn.innerHTML='⏳ जाँच रहे हैं...'; btn.style.opacity='0.7'; btn.style.pointerEvents='none'; }
@@ -2424,7 +2424,7 @@ async function proceedFromCode(){
       let regData=null;
       try{ regData=await fbGet('regRequests'); }catch(e){}
       const regsAll=regData?Object.values(regData):[];
-      const existingReg=regsAll.find(r=>r.empId===code&&(r.company==='GLS'||!r.company));
+      const existingReg=regsAll.find(r=>r.empId===code&&(r.company==='MET Power'||!r.company));
 
       if(existingReg){
         if(existingReg.status==='approved'){
@@ -2456,7 +2456,7 @@ function showLoginApprovalOverlay(emp, existingReg){
   let ov=document.getElementById('loginApprovalOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='loginApprovalOverlay'; document.body.appendChild(ov); }
   ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#0a0f1a;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
-  const secLabel=secName(emp.sec)||'GLS';
+  const secLabel=secName(emp.sec)||'MET Power';
   window._laEmp=emp; window._laExistingReg=existingReg; window._laSelfieData=null;
   ov.innerHTML=`
     <div style="width:100%;max-width:360px">
@@ -2550,7 +2550,7 @@ async function submitLoginWithSelfie(){
 
   // Show waiting screen
   const ov=document.getElementById('loginApprovalOverlay');
-  const secLabel=secName(emp.sec)||'GLS';
+  const secLabel=secName(emp.sec)||'MET Power';
   if(ov) ov.innerHTML=`
     <div style="width:100%;max-width:360px;text-align:center">
       <div style="font-size:52px;margin-bottom:10px">&#128241;</div>
@@ -2667,7 +2667,7 @@ async function doLoginAfterApproval(emp, existingReg, deviceId){
   }
   
   SESSION={role:'worker',name:emp.name,empId:emp.empId,empObjId:emp.id,
-           dept:emp.sec||'MET',company:'GLS',deviceId,loginAt:new Date().toISOString()};
+           dept:emp.sec||'MET',company:'MET Power',deviceId,loginAt:new Date().toISOString()};
   writeIntegrityToken();
   saveSession();
   const ov=document.getElementById('loginApprovalOverlay'); if(ov) ov.style.display='none';
@@ -2822,7 +2822,7 @@ async function _submitPwLogin(empId, empName, deviceId){
     mgrMobile = String(CFG.contactVivek||'').replace(/\D/g,'').slice(-10);
   }
   SESSION={role:isMgrRole?'manager':'worker',name:emp.name||empName,empId:emp.empId||empId,
-           empObjId:emp.id||empId,dept:emp.sec||'MET',company:'GLS',deviceId,
+           empObjId:emp.id||empId,dept:emp.sec||'MET',company:'MET Power',deviceId,
            accessLevel,loginAt:new Date().toISOString()};
   if(isMgrRole && mgrMobile.length===10) SESSION.mobile = mgrMobile;
   writeIntegrityToken();
@@ -3273,7 +3273,7 @@ async function submitNewEmpReg(code){
     const passHash=await hashPass(code+':MP_USR');
     const key=await fbPush('regRequests',{
       empId:code, name:code, sec:dept, dept:dept,
-      phone:phone, company:'GLS', status:'pending',
+      phone:phone, company:'MET Power', status:'pending',
       deviceId:deviceId, passHash:passHash,
       selfieUrl:selfieUrl||'',
       requestedAt:new Date().toISOString()
@@ -3343,7 +3343,7 @@ function listenAdminNotifications(){
     // Show browser notification for latest unread
     if(unread.length>0 && typeof Notification !== 'undefined' && Notification.permission==='granted'){
       const [k, latest] = unread[unread.length-1];
-      new Notification(latest.title||'GLS MP', {
+      new Notification(latest.title||'MET Power', {
         body:latest.body||'नई activity',
         icon:'/MP-App/icons/icon-192.png',
         tag:'mp-admin-notif'
@@ -3460,7 +3460,7 @@ async function launchApp(){
   }
   else if(isGuest()){ 
     const co = SESSION.company||'GUEST';
-    rt.textContent = co !== 'GLS' ? '🏢 '+co : '👤 GUEST'; 
+    rt.textContent = co !== 'MET Power' ? '🏢 '+co : '👤 GUEST'; 
     rt.className='role-tag'; 
     rt.style.cssText='background:rgba(148,163,184,.15);color:#94a3b8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; 
   }
@@ -4443,7 +4443,7 @@ async function confirmLeaveTeamTransfer(useRecommended){
         `*${SESSION.name||'Previous manager'}* ने team आपको transfer कर दी है।\n\n`+
         `📱 Login: +91 ${newKey}\n`+
         `👥 Members transferred: ${n}\n\n`+
-        `App खोलकर Manager के रूप में login करें।\n_— MET Power_`;
+        `App खोलकर Manager के रूप में login करें।\n_— MET_`;
       openWA(newKey, waMsg);
     }catch(e){}
 
@@ -4798,7 +4798,7 @@ function getJoiningDate(emp){
   return emp.joiningDate || null;
 }
 function isWorking(s){ return ['D','N','G','GP'].includes(s); }
-function isGLSUser(){ return isAdmin() || SESSION.company === 'GLS' || SESSION.company === '' || !SESSION.company || SESSION.approved === true; }
+function isMetPowerCompanyUser(){ return isAdmin() || SESSION.company === 'MET Power' || SESSION.company === '' || !SESSION.company || SESSION.approved === true; }
 
 // ════════════════════════════════════════
 // HOME / OVERVIEW
@@ -5119,7 +5119,7 @@ async function submitHomeTodo(){
         if(emp && emp.phone && emp.phone.length === 10){
           const prioLabel = priority==='high' ? '🔴 Urgent' : priority==='low' ? '🟢 Low' : '🟡 Normal';
           const dueFmt = dueDate ? new Date(dueDate).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'}) : '';
-          let waMsg = `📌 *GLS Polyfilms — Task Assigned*\n\n`;
+          let waMsg = `📌 *MET Power — Task Assigned*\n\n`;
           waMsg += `*${emp.name}*, आपको यह काम पूरा करना है`;
           if(dueFmt) waMsg += ` *${dueFmt}* तक`;
           waMsg += `:\n\n`;
@@ -5312,7 +5312,7 @@ async function handleExcelFile(file){
     let formatName='', empCount=0, savedMonths=[];
 
     // ══════════════════════════════════════════════
-    // FORMAT A: HORIZONTAL ALL-MONTHS (your GLS file)
+    // FORMAT A: HORIZONTAL ALL-MONTHS (your MET Power file)
     // Row 0: title cells "...Month December-2025..." at month-start cols
     // Row 1: day-of-week (MON, TUE...)  
     // Row 2: S.No | Name | EmpCode | W-OFF | ... | 1 | 2 | 3 ... (day numbers restart per month)
@@ -5328,7 +5328,7 @@ async function handleExcelFile(file){
 
     if(titleCells.length > 0 && hasDayNums){
       // ── HORIZONTAL FORMAT ──
-      formatName = 'GLS Horizontal All-Months Format';
+      formatName = 'MET Power Horizontal All-Months Format';
 
       // EmpCode is always col index 2 (0-based: S.No=0, Name=1, EmpCode=2)
       const empCodeCol = 2;
@@ -5394,12 +5394,12 @@ async function handleExcelFile(file){
 
     } else {
       // ══════════════════════════════════════════════
-      // FORMAT B: VERTICAL (date rows) or GLS SECTION-BLOCKS
+      // FORMAT B: VERTICAL (date rows) or MET Power SECTION-BLOCKS
       // ══════════════════════════════════════════════
-      const isGLSSectionFormat = rows.some(r=>r.some(c=>/e\.?\s*code/i.test(String(c||''))));
+      const isSectionBlockFormat = rows.some(r=>r.some(c=>/e\.?\s*code/i.test(String(c||''))));
 
-      if(isGLSSectionFormat){
-        formatName = 'GLS Section-Block Format';
+      if(isSectionBlockFormat){
+        formatName = 'MET Power Section-Block Format';
         let i=0;
         while(i<rows.length){
           const row=rows[i];
@@ -5484,7 +5484,7 @@ async function handleExcelFile(file){
     if(months.length===0){
       statusEl.innerHTML=`<span style="color:var(--lv)">❌ कोई valid data नहीं मिला<br>
         <span style="color:var(--muted2)">Format detected: ${formatName||'Unknown'}<br>
-        Expected: GLS file with month titles in row 1, empCode in col 3</span></span>`;
+        Expected: MET Power file with month titles in row 1, empCode in col 3</span></span>`;
       return;
     }
 
@@ -5568,7 +5568,7 @@ async function testSmsApi(){
   statusEl.style.border='1px solid rgba(251,191,36,.3)';
   statusEl.style.color='var(--day)';
   statusEl.textContent='⏳ Test SMS भेजा जा रहा है...';
-  const result = await sendFast2Sms(key, phone, 'GLS MP Test: SMS notification system सही काम कर रहा है! ✅');
+  const result = await sendFast2Sms(key, phone, 'MET Power Test: SMS notification system सही काम कर रहा है! ✅');
   if(result.ok){
     statusEl.style.background='rgba(34,197,94,.08)';
     statusEl.style.border='1px solid rgba(34,197,94,.3)';
@@ -5609,12 +5609,12 @@ function buildShiftSms(empName, date, shift){
   const shiftNames = { D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', A:'A Shift', B:'B Shift', C:'C Shift', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Compensatory Off', HLF:'Half Day', Ab:'Absent' };
   const shiftLabel = shiftNames[shift] || shift;
   const fmtD = new Date(date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-  return `GLS Polyfilms MP System:
+  return `MET Power MP System:
 Priy ${empName},
 Aapki ${fmtD} ki shift update hui:
 ${shiftLabel}
 Koi sawal ho to supervisor se mile.
--GLS MP System`;
+-MET Power System`;
 }
 
 // SMS removed — WhatsApp used instead (free)
@@ -6209,7 +6209,7 @@ function renderSchedule(){
     },
   ];
 
-  // ── Fallback: any employee whose sec isn't one of GLS's fixed codes above ──
+  // ── Fallback: any employee whose sec isn't one of fixed codes above ──
   // (this is every employee for any new self-registered company's own machines)
   const _coveredSecs = new Set(['M1','M2','S1','S2','SUP','MGR']);
   const _extraSecs = Array.from(new Set(allEmps.map(e=>e.sec).filter(s=>s && !_coveredSecs.has(s))));
@@ -7070,7 +7070,7 @@ async function approveLeave(leaveKey, leave, suggestions){
       const toFmt   = new Date(leave.to  ).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
       const days = dateRange(leave.from, leave.to).length;
       const leaveTypeLabel = leave.type === 'CL' ? 'Casual Leave' : leave.type === 'SL' ? 'Sick Leave' : leave.type === 'EL' ? 'Earned Leave' : (leave.type||'Leave');
-      let waMsg = `✅ *GLS Polyfilms — Leave Approved*\n\nनमस्ते *${emp.name}*,\n\nआपकी Leave Request मंजूर हो गई है।\n\n`;
+      let waMsg = `✅ *MET Power — Leave Approved*\n\nनमस्ते *${emp.name}*,\n\nआपकी Leave Request मंजूर हो गई है।\n\n`;
       waMsg += `📅 *Leave Period:* ${fromFmt}`;
       if(leave.from !== leave.to) waMsg += ` से ${toFmt}`;
       waMsg += `\n📆 *कुल दिन:* ${days} दिन\n`;
@@ -7590,7 +7590,7 @@ function renderReports(){
   let fbList = getReports();
   if(!isAdmin()) fbList = fbList.filter(r=>r.status==='approved'||r.reportedById===SESSION.empObjId);
 
-  // Build legacy NCR cards — only for GLS's own legacy viewers (Admin / old employee-code roles).
+  // Build legacy NCR cards — only for legacy viewers (Admin / old employee-code roles).
   // New self-registered Manager/Member accounts should never see this hardcoded historical data.
   // Legacy hardcoded NCR demo data — removed entirely, no longer shown to anyone
   const legacyNcrs = [];
@@ -8348,7 +8348,7 @@ function renderPending(){
             <div class="card-ico" style="background:rgba(249,115,22,.15)">&#128241;</div>
             <div class="card-body">
               <div class="card-name">${v.empName}</div>
-              <div class="card-sub">Code: ${v.empId} · ${secName(v.empSec)||'GLS'}${v.phone?' · 📱 '+v.phone:''}</div>
+              <div class="card-sub">Code: ${v.empId} · ${secName(v.empSec)||'MET Power'}${v.phone?' · 📱 '+v.phone:''}</div>
               <div class="card-meta">${new Date(v.requestedAt).toLocaleString('hi-IN')}</div>
               ${v.isNewReg?'<div style="font-size:11px;color:#f97316;font-weight:700">&#128100; Newly Registered Employee</div>':''}
               ${v.selfieUrl?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px"><img src="${v.selfieUrl}" style="width:72px;height:72px;border-radius:10px;object-fit:cover;border:2px solid rgba(249,115,22,.5);cursor:pointer" onclick="window.open('${v.selfieUrl}','_blank')"><span style="font-size:11px;color:#94a3b8">📸 Selfie<br><span style="font-size:10px;color:#64748b">Tap to zoom</span></span></div>`:'<div style="margin-top:6px;font-size:11px;color:#f43f5e">⚠️ कोई Selfie नहीं</div>'}
@@ -10122,7 +10122,7 @@ async function addEmployee(){
   const emp={id,name,empId:code,sec,mc,resp,woff,status:'active',
     designation,
     companyId:myCompanyId()==='ALL'?'gls':myCompanyId(),
-    companyLabel:SESSION.company||'GLS',
+    companyLabel:SESSION.company||'MET Power',
     ms:Array(31).fill('D')};
   if(SESSION.role==='manager' && SESSION.mobile){ emp.managerId=_normMobileKey(SESSION.mobile); }
   if(phone) emp.phone=phone;
@@ -10196,67 +10196,131 @@ function openEditEmpForm(empId){
     </label>
   </div>` : ''}
   <div style="font-size:11px;color:var(--muted2);margin:4px 0 12px">${isEn?'Section updates automatically from Machine.':'Section मशीन से अपने आप अपडेट होगी।'}</div>
-  <button class="submit-btn" onclick="saveEmployee('${empId}')">💾 ${isEn?'Save':'सेव करें'}</button>
-  <button class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
+  <button type="button" class="submit-btn" id="ee_saveBtn" onclick="event.preventDefault();saveEmployee('${empId}')">💾 ${isEn?'Save':'सेव करें'}</button>
+  <button type="button" class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
 }
 
 async function saveEmployee(empId){
-  const e=getEmps().find(x=>x.id===empId);
+  try{
+  const e = (getEmps().find(x=>x.id===empId))
+    || ((_cache.employees||[]).find(x=>x.id===empId))
+    || null;
   if(!isAdmin() && !isMgr()){ toast('❌ Only Admin/Manager can edit'); return; }
-  const mcVal = document.getElementById('ee_mc').value.trim();
-  const desigVal = document.getElementById('ee_designation')?.value||'';
-  let phoneVal = (document.getElementById('ee_phone')?.value||'').trim().replace(/\D/g,'').slice(-10);
-  // Manager cannot change their own login mobile (must match SESSION)
-  if(isManagerSelfRecord(e)){
-    phoneVal = _normMobileKey(SESSION.mobile||SESSION.uid||e.phone||'');
+  if(!empId){ toast('❌ Missing employee id'); return; }
+
+  const val = (id) => {
+    const el = document.getElementById(id);
+    return el ? String(el.value||'').trim() : '';
+  };
+  const checked = (id) => {
+    const el = document.getElementById(id);
+    return !!(el && el.checked);
+  };
+
+  const mcVal = val('ee_mc');
+  const desigVal = val('ee_designation');
+  let phoneVal = val('ee_phone').replace(/\D/g,'').slice(-10);
+  // Manager cannot change their own login mobile
+  if(e && isManagerSelfRecord(e)){
+    phoneVal = _normMobileKey(SESSION.mobile||SESSION.uid||e.phone||e.mobile||'');
   }
+  const nameVal = val('ee_name').toUpperCase();
+  if(!nameVal){ toast('⚠️ Name required'); return; }
+
   const update = {
-    name:        document.getElementById('ee_name').value.trim().toUpperCase(),
-    empId:       document.getElementById('ee_code').value.trim(),
+    name:        nameVal,
+    empId:       val('ee_code'),
     mc:          mcVal,
-    sec:         _secFromMachine(mcVal, desigVal),
-    resp:        document.getElementById('ee_resp').value.trim(),
-    woff:        document.getElementById('ee_woff').value,
-    status:      document.getElementById('ee_status').value,
+    sec:         (typeof _secFromMachine==='function' ? _secFromMachine(mcVal, desigVal) : (e&&e.sec)||''),
+    resp:        val('ee_resp'),
+    woff:        val('ee_woff') || 'SUN',
+    status:      val('ee_status') || 'active',
     phone:       phoneVal,
     mobile:      phoneVal,
     designation: desigVal,
-    accessLevel: document.getElementById('ee_accessLevel')?.value||'worker',
+    accessLevel: val('ee_accessLevel') || (e && e.accessLevel) || 'worker',
+    updatedAt:   new Date().toISOString(),
+    updatedBy:   SESSION.name || SESSION.mobile || 'manager'
   };
-  // Team authorization levels (manager assigns to members)
-  if((isMgr()||isAdmin()) && !isManagerSelfRecord(e)){
-    update.perms = {
-      schedule: !!document.getElementById('ee_perm_schedule')?.checked,
-      leave: !!document.getElementById('ee_perm_leave')?.checked,
-      reports: !!document.getElementById('ee_perm_reports')?.checked
-    };
+
+  // Team authorization (always write when manager/admin edits a member — not self)
+  if((isMgr()||isAdmin()) && !(e && isManagerSelfRecord(e))){
+    // Checkboxes may be missing if UI not shown; still clear/set explicitly when present
+    const hasPermUi = !!document.getElementById('ee_perm_schedule');
+    if(hasPermUi){
+      update.perms = {
+        schedule: checked('ee_perm_schedule'),
+        leave: checked('ee_perm_leave'),
+        reports: checked('ee_perm_reports')
+      };
+    }
   }
-  // Allow Admin & Manager to edit all team members including managers
-  const joining = document.getElementById('ee_joining')?.value?.trim();
-  const dob     = document.getElementById('ee_dob')?.value?.trim();
-  const salary  = document.getElementById('ee_salary')?.value?.trim();
-  if(joining) update.joiningDate   = joining;
-  if(dob)     update.dob           = dob;
-  if(salary)  update.monthlySalary = parseFloat(salary);
-  else if(salary==='') update.monthlySalary = null;
-  // Block phone if already used by another employee / other team
+
+  const joining = val('ee_joining');
+  const dob     = val('ee_dob');
+  const salary  = val('ee_salary');
+  if(joining) update.joiningDate = joining;
+  if(dob) update.dob = dob;
+  if(salary !== ''){
+    const n = parseFloat(salary);
+    update.monthlySalary = isFinite(n) ? n : null;
+  }
+
+  // Phone clash — exclude self by id AND by same phone already on this record
   if(update.phone && update.phone.length === 10){
-    const clash = _findPhoneConflict(update.phone, empId, update.empId);
-    if(clash){
-      const nm = clash.emp.name || clash.emp.empId || '';
-      toast((typeof _lang!=='undefined'&&_lang==='en')
-        ? (clash.otherTeam
-            ? `📱 Mobile already belongs to another team's member (${nm}).`
-            : `📱 Mobile already registered to ${nm}.`)
-        : (clash.otherTeam
-            ? `📱 यह मोबाइल नंबर पहले से दूसरे team के member (${nm}) के पास है।`
-            : `📱 यह मोबाइल नंबर पहले से ${nm} के पास registered है।`));
+    const selfPhone = e ? _normMobileKey(e.phone||e.mobile||'') : '';
+    if(update.phone !== selfPhone){
+      const clash = _findPhoneConflict(update.phone, empId, update.empId);
+      if(clash && clash.emp && clash.emp.id !== empId){
+        const nm = clash.emp.name || clash.emp.empId || '';
+        toast((typeof _lang!=='undefined'&&_lang==='en')
+          ? (clash.otherTeam
+              ? `📱 Mobile already belongs to another team's member (${nm}).`
+              : `📱 Mobile already registered to ${nm}.`)
+          : (clash.otherTeam
+              ? `📱 यह मोबाइल नंबर पहले से दूसरे team के member (${nm}) के पास है।`
+              : `📱 यह मोबाइल नंबर पहले से ${nm} के पास registered है।`));
+        return;
+      }
+    }
+  }
+
+  // Prefer multi-path update for nested perms reliability
+  try{
+    await fbUpdate('employees/'+empId, update);
+  }catch(err1){
+    console.warn('saveEmployee fbUpdate failed, retry set merge', err1);
+    // Fallback: write perms fields flat if nested blocked
+    const flat = {...update};
+    if(flat.perms){
+      flat.permSchedule = !!flat.perms.schedule;
+      flat.permLeave = !!flat.perms.leave;
+      flat.permReports = !!flat.perms.reports;
+    }
+    try{
+      await fbUpdate('employees/'+empId, flat);
+    }catch(err2){
+      console.error('saveEmployee failed', err2);
+      toast('❌ Save failed: '+(err2.message||err2.code||'permission/network'));
       return;
     }
   }
-  await fbUpdate(`employees/${empId}`, update);
+
+  // Patch local cache so UI updates immediately
+  try{
+    if(!_cache.employees) _cache.employees = [];
+    const ix = _cache.employees.findIndex(x=>x.id===empId);
+    if(ix>=0) _cache.employees[ix] = {..._cache.employees[ix], ...update, id: empId};
+    else _cache.employees.push({...update, id: empId});
+  }catch(e){}
+
   closeModal();
+  try{ if(typeof renderTeam==='function') renderTeam(); }catch(e){}
   toast((typeof _lang!=='undefined'&&_lang==='en') ? '✅ Details updated' : '✅ जानकारी अपडेट हो गई');
+  }catch(err){
+    console.error('saveEmployee', err);
+    toast('❌ Save error: '+(err.message||err));
+  }
 }
 
 function confirmDelEmp(id, name){
@@ -10892,7 +10956,7 @@ async function confirmTeamExcelUpload(){
         joiningDate: emp.joiningDate || '',
         dob: emp.dob || '',
         companyId: SESSION.companyId || _normCompanyId(SESSION.company) || 'gls',
-        companyLabel: SESSION.company || 'GLS',
+        companyLabel: SESSION.company || 'MET Power',
         updatedAt: new Date().toISOString(),
         updatedBy: SESSION.name || 'manager'
       };
@@ -12817,8 +12881,8 @@ function editShiftCell(empId, empName, date, currentShift){
     <button class="cancel-btn" onclick="closeModal()">रद्द करें</button>`);
 }
 
-// ── India Public Holidays (GLS Polyfilms relevant) ──
-const GLS_HOLIDAYS = {
+// ── India Public Holidays (MET Power relevant) ──
+const MET_HOLIDAYS = {
   // ── 2026 Gazetted + Flexible Packaging Industry Holidays ──
   '2026-01-01': 'New Year\'s Day',
   '2026-01-14': 'Makar Sankranti',
@@ -12886,7 +12950,7 @@ function openCompOffDetails(empId, empName, coDate, currentShift){
     const ds = d.toISOString().slice(0,10);
     const dayName = ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getDay()];
     const isWoff = dayName===woff;
-    const isHoli = !!GLS_HOLIDAYS[ds];
+    const isHoli = !!MET_HOLIDAYS[ds];
     // Only show if it was a W-off or holiday AND employee actually came to duty (D or N)
     if(isWoff || isHoli){
       const actualShift = getShift(emp, ds);
@@ -12896,7 +12960,7 @@ function openCompOffDetails(empId, empName, coDate, currentShift){
           label: d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+' ('+dayName+')',
           isHoli,
           isWoff,
-          holiName: GLS_HOLIDAYS[ds]||null,
+          holiName: MET_HOLIDAYS[ds]||null,
           shift: actualShift
         });
       }
@@ -14245,7 +14309,7 @@ async function _execPrint(){
         </div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:16px;font-weight:900;color:#1e293b">GLS Group — Shift Schedule</div>
+        <div style="font-size:16px;font-weight:900;color:#1e293b">MET Power — Shift Schedule</div>
         <div style="font-size:12px;color:#475569;font-weight:700;margin-top:2px">${lbl}</div>
       </div>
     </div>
@@ -14291,7 +14355,7 @@ async function _execPrint(){
     });
     const link = document.createElement('a');
     const safeLbl = lbl.replace(/[^a-zA-Z0-9]/g,'_');
-    link.download = `GLS_Schedule_${safeLbl}_${sectionLabel.replace(/[^a-zA-Z0-9]/g,'_')}.jpg`;
+    link.download = `METPower_Schedule_${safeLbl}_${sectionLabel.replace(/[^a-zA-Z0-9]/g,'_')}.jpg`;
     link.href = canvas.toDataURL('image/jpeg', 0.95);
     link.click();
     toast('✅ Schedule image download हो गई!');
@@ -14329,7 +14393,7 @@ function exportSchedExcel(){
   ];
 
   const rows = [];
-  rows.push(['GLS Polyfilms / MET Power — Schedule + Team export']);
+  rows.push(['MET Power / MET Power — Schedule + Team export']);
   rows.push(['Range: ' + lbl, 'Generated: ' + new Date().toLocaleString('en-IN')]);
   rows.push([]);
 
@@ -14473,7 +14537,7 @@ function openLearnSection(section){
     if(fr){
       fr.style.display='none';
       if(loader) loader.style.display='flex';
-      setTimeout(()=>{ fr.src=''; setTimeout(()=>{ fr.src='MetalTrain_Pro_v5_Mobile.html'; },100); },50);
+      setTimeout(()=>{ fr.src=''; setTimeout(()=>{ fr.src='met_train_pro.html'; },100); },50);
     }
   } else if(section === 'supskill'){
     supSkillView.style.display='flex';
@@ -14971,7 +15035,7 @@ window.sendShiftDataToSupSkill = function(dayIdx, shiftCode){
     const supMachine = (myEmpRec && myEmpRec.mc) ? myEmpRec.mc : 'M-1';
 
     const payload = {
-      type:       'GLSMP_SHIFT_DATA',
+      type:       'METPOWER_SHIFT_DATA',
       shift:      currentShift,
       shiftCode:  code,                    // raw 'D'/'N' for internal use
       shiftLabel: currentShift === 'DAY' ? '7:00 AM – 7:00 PM' : '7:00 PM – 7:00 AM',
@@ -14988,6 +15052,7 @@ window.sendShiftDataToSupSkill = function(dayIdx, shiftCode){
       firebaseProject: 'man-power-mp'
     };
     fr.contentWindow.postMessage(payload, '*');
+    try{ fr.contentWindow.postMessage({...payload, type:'GLSMP_SHIFT_DATA'}, '*'); }catch(e){}
     window.updateSupSkillShiftBadge();
   }catch(err){ console.warn('[SupSkill] sendShiftDataToSupSkill error:', err); }
 };
@@ -15023,7 +15088,7 @@ window.addEventListener('message', function(e){
     const empsForDate = getEmployeesOnCurrentShift(dayIdx, shiftCode, yr, mo);
 
     fr.contentWindow.postMessage({
-      type:      'GLSMP_SHIFT_DATA_FOR_DATE',
+      type:      'METPOWER_SHIFT_DATA_FOR_DATE',
       date:      reqDate,
       dayIndex:  dayIdx,
       shiftCode: shiftCode,
@@ -15034,7 +15099,7 @@ window.addEventListener('message', function(e){
     }, '*');
   }
 
-  // ── SupSkill report submitted — show detailed toast in GLSMP ──
+  // ── SupSkill report submitted — show detailed toast in MET Power ──
   if(e.data.type === 'SUPSKILL_REPORT_SUBMITTED'){
     try{
       const r   = e.data.data || {};
@@ -15058,10 +15123,10 @@ window.addEventListener('message', function(e){
       const data = e.data.data;
       if(key && data && window._fbAccess){
         window._fbAccess('set', 'supskillAnalysis/' + key, data)
-          .then(function(){ console.log('[GLSMP] SupSkill analysis saved:', key); })
-          .catch(function(err){ console.warn('[GLSMP] SupSkill analysis save failed:', err); });
+          .then(function(){ console.log('[METPower] SupSkill analysis saved:', key); })
+          .catch(function(err){ console.warn('[METPower] SupSkill analysis save failed:', err); });
       }
-    }catch(e2){ console.warn('[GLSMP] SUPSKILL_SAVE_ANALYSIS error:', e2); }
+    }catch(e2){ console.warn('[METPower] SUPSKILL_SAVE_ANALYSIS error:', e2); }
   }
 
   // ── SupSkill save downtime data to Firebase ──
@@ -15071,10 +15136,10 @@ window.addEventListener('message', function(e){
       const data = e.data.data;
       if(key && data && window._fbAccess){
         window._fbAccess('set', 'supskillDowntime/' + key, data)
-          .then(function(){ console.log('[GLSMP] SupSkill downtime saved:', key); })
-          .catch(function(err){ console.warn('[GLSMP] SupSkill downtime save failed:', err); });
+          .then(function(){ console.log('[METPower] SupSkill downtime saved:', key); })
+          .catch(function(err){ console.warn('[METPower] SupSkill downtime save failed:', err); });
       }
-    }catch(e2){ console.warn('[GLSMP] SUPSKILL_SAVE_DOWNTIME error:', e2); }
+    }catch(e2){ console.warn('[METPower] SUPSKILL_SAVE_DOWNTIME error:', e2); }
   }
 });
 
@@ -15684,9 +15749,9 @@ async function submitContent(){
 
 // ════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════
-// GLS TRAINING HUB — SOP + WI DATA
+// MET Power TRAINING HUB — SOP + WI DATA
 // ══════════════════════════════════════════════
-const GLS_TRAIN_DATA = [
+const MET_TRAIN_DATA = [
 
   // ─── SOPs ───────────────────────────────────
   { id:'SOP-01', type:'sop', color:'#8b5cf6', icon:'🔄', title:'Metallizer Flow Chart',
@@ -16145,8 +16210,8 @@ function filterTraining(){
   renderTrainCards();
 }
 
-// GLS Training section open/close
-function openGLSSection(type){
+// MET Power Training section open/close
+function openMetTrainSection(type){
   const trainArea  = document.getElementById('glsTrainArea');
   const careerArea = document.getElementById('glsCareerArea');
   if(!trainArea || !careerArea) return;
@@ -16173,7 +16238,7 @@ function openGLSSection(type){
   setTimeout(()=>trainArea.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
 
-function closeGLSSection(){
+function closeMetTrainSection(){
   const ta = document.getElementById('glsTrainArea');
   const ca = document.getElementById('glsCareerArea');
   if(ta) ta.style.display = 'none';
@@ -16233,7 +16298,7 @@ function renderTrainCards(){
   const search = _trainSearch;
   const tab = _trainTab;
 
-  const filtered = GLS_TRAIN_DATA.filter(item=>{
+  const filtered = MET_TRAIN_DATA.filter(item=>{
     // Tab filter
     if(tab==='sop' && item.type!=='sop') return false;
     if(tab==='wi' && item.type!=='wi') return false;
@@ -16409,13 +16474,13 @@ const LEARN_MODULES = {
   },
 
   // ════════════════════════════════════════════════
-  // GLS POLYFILMS — REAL TRAINING MODULES (From actual GLS training sessions)
-  // Trainer: Mr. Vivek Kumar | Plant: GLS Polyfilms Pvt. Ltd., Gurawara
+  // MET Power POLYFILMS — REAL TRAINING MODULES (From actual MET Power training sessions)
+  // Trainer: Mr. Vivek Kumar | Plant: MET Power Pvt. Ltd., Gurawara
   // ════════════════════════════════════════════════
 
   gls_sap: {
     name:'SAP Entry Training', icon:'💻', color:'#06b6d4', isFree:true,
-    subtitle:'GLS के असली SAP गलतियाँ और उनका सही तरीका — Real Training by Vivek Sir',
+    subtitle:'MET Power के असली SAP गलतियाँ और उनका सही तरीका — Real Training by Vivek Sir',
     gls:true,
     lessons:[
       {
@@ -16487,7 +16552,7 @@ const LEARN_MODULES = {
 
   gls_process: {
     name:'Process & Machine', icon:'⚙️', color:'#f97316', isFree:true,
-    subtitle:'Metalliser machine के real operation points — GLS Shop Floor से सीधे',
+    subtitle:'Metalliser machine के real operation points — MET Power Shop Floor से सीधे',
     gls:true,
     lessons:[
       {
@@ -16561,7 +16626,7 @@ const LEARN_MODULES = {
 
   gls_safety: {
     name:'Safety & 5S', icon:'🛡️', color:'#ef4444', isFree:true,
-    subtitle:'GLS Safety Rules, Emergency Buttons, 5S Audit Points — सभी के लिए जरूरी',
+    subtitle:'MET Power Safety Rules, Emergency Buttons, 5S Audit Points — सभी के लिए जरूरी',
     gls:true,
     lessons:[
       {
@@ -16582,7 +16647,7 @@ const LEARN_MODULES = {
       },
       {
         id:'gsa2', title:'5S Training — Audit Points (TN2606)',
-        desc:'5S के 5 steps और GLS audit में fail होने वाली activities।',
+        desc:'5S के 5 steps और MET Power audit में fail होने वाली activities।',
         date:'2026', sop:'5S Standard', audio:false, video:false, live:false,
         content:{
           category:'✨ 5S — 5 Steps',
@@ -16598,8 +16663,8 @@ const LEARN_MODULES = {
       },
       {
         id:'gsa5', title:'5S Audit Checksheet — 13 Points Floor Audit (Met & Slitter)',
-        desc:'GLS का actual 5S floor audit checklist — सभी 13 checkpoints हिंदी और English में।',
-        date:'March 2026', sop:'5S Audit Checksheet GLSP', audio:false, video:false, live:false,
+        desc:'MET Power का actual 5S floor audit checklist — सभी 13 checkpoints हिंदी और English में।',
+        date:'March 2026', sop:'5S Audit Checksheet', audio:false, video:false, live:false,
         content:{
           category:'📋 5S Floor Audit — 13 Checkpoints (Score: ❌=0 ⚠️=1 ✅=2)',
           points:[
@@ -16622,7 +16687,7 @@ const LEARN_MODULES = {
       },
       {
         id:'gsa6', title:'5S Responsibility Chart — कौन, कब, कहाँ',
-        desc:'हर supervisor की 5S area responsibility — GLS Met department day-wise।',
+        desc:'हर supervisor की 5S area responsibility — MET Power Met department day-wise।',
         date:'March 2026', sop:'5S Responsibility Sheet', audio:false, video:false, live:false,
         content:{
           category:'👥 5S Area Responsibility — Met Department',
@@ -16639,11 +16704,11 @@ const LEARN_MODULES = {
         }
       },
       {
-        id:'gsa7', title:'5S Visual Management — GLS Plant Labels & Storage Locations',
-        desc:'GLS plant में लगे सभी area labels, tags और yellow markings — Set in Order का real example।',
+        id:'gsa7', title:'5S Visual Management — MET Power Plant Labels & Storage Locations',
+        desc:'MET Power plant में लगे सभी area labels, tags और yellow markings — Set in Order का real example।',
         date:'2025-26', sop:'5S Visual Management', audio:false, video:false, live:false,
         content:{
-          category:'🏷️ GLS Plant — Visual Management (Set in Order)',
+          category:'🏷️ MET Power Plant — Visual Management (Set in Order)',
           points:[
             { icon:'📦', label:'NEW WIRE SPOOL (Yellow Box Marking)', text:'New Al wire spool boxes की dedicated spot — yellow tape से marked floor area। Photos में साफ दिख रहा है — यही perfect 5S है!' },
             { icon:'🔵', label:'8" ALUMINUM CORES (MET-2)', text:'8 inch aluminum cores की fixed storage — MET-2 area में clearly labeled' },
@@ -16661,12 +16726,12 @@ const LEARN_MODULES = {
             { icon:'📦', label:'EMPTY CARDBOARD BOXES', text:'Empty boxes की tidy, designated storage — random floor पर नहीं' },
             { icon:'🏗️', label:'AIR RECEIVER-2 (Yellow Floor Marking)', text:'Air Receiver tank के चारों तरफ yellow floor marking — safe zone clearly defined' },
           ],
-          rule:'💡 GLS 5S का real result — बिना पूछे, बिना खोजे, हर चीज अपनी जगह मिलती है। यही world class shop floor होता है!'
+          rule:'💡 MET Power 5S का real result — बिना पूछे, बिना खोजे, हर चीज अपनी जगह मिलती है। यही world class shop floor होता है!'
         }
       },
       {
         id:'gsa8', title:'Air Receiver Tank — Pressure Vessel Safety Certificate (PV-02)',
-        desc:'GLS का Air Receiver Tank-2 — certificate details, safe working pressure, और inspection awareness।',
+        desc:'MET Power का Air Receiver Tank-2 — certificate details, safe working pressure, और inspection awareness।',
         date:'16.02.2024', sop:'Factory Act Rule 61 — Form No. 8', audio:false, video:false, live:false,
         content:{
           category:'⚙️ Pressure Vessel Safety — Air Receiver 2 (2000 Ltrs)',
@@ -16702,7 +16767,7 @@ const LEARN_MODULES = {
       },
       {
         id:'gsa4', title:'Scrap Metal Piece in Potli — Serious Incident (TNG25001)',
-        desc:'Scrap potli में metal piece मिलना — GLS का real serious incident और lesson।',
+        desc:'Scrap potli में metal piece मिलना — MET Power का real serious incident और lesson।',
         date:'20.02.2025', sop:'TNG25001', audio:false, video:false, live:false,
         content:{
           category:'🚨 Serious Incident — Real Case',
@@ -16721,7 +16786,7 @@ const LEARN_MODULES = {
 
   gls_sop: {
     name:'SOPs & Rules', icon:'📋', color:'#8b5cf6', isFree:true,
-    subtitle:'GLS के actual SOPs और real rules — जो daily follow करने हैं',
+    subtitle:'MET Power के actual SOPs और real rules — जो daily follow करने हैं',
     gls:true,
     lessons:[
       {
@@ -17055,13 +17120,13 @@ const LEARN_MODULES = {
 
   gls_formats: {
     name:'Formats and Logbooks', icon:'📒', color:'#a3e635', isFree:true,
-    subtitle:'GLS के सभी formats — क्या भरें, कैसे भरें, कौन responsible है',
+    subtitle:'MET Power के सभी formats — क्या भरें, कैसे भरें, कौन responsible है',
     gls:true,
     lessons:[
       {
         id:'gf1', title:'Metallizer Log Book — MET F/01',
         desc:'Metallizer Log Book के सभी columns — क्या record करना है हर cycle में।',
-        date:'Format: GLS/MET/F/01', sop:'MET/F/01', audio:false, video:false, live:false,
+        date:'Format: MET/F/01', sop:'MET/F/01', audio:false, video:false, live:false,
         content:{
           category:'📒 MET F/01 — Metallizer Log Book Columns',
           points:[
@@ -17078,7 +17143,7 @@ const LEARN_MODULES = {
       {
         id:'gf2', title:'Met Slitter Log Book — MET F/02',
         desc:'Slitter Log Book के Input/Output columns और shift performance tracking।',
-        date:'Format: GLS/MET/F/02', sop:'MET/F/02', audio:false, video:false, live:false,
+        date:'Format: MET/F/02', sop:'MET/F/02', audio:false, video:false, live:false,
         content:{
           category:'📒 MET F/02 — Met Slitter Log Book',
           points:[
@@ -17095,7 +17160,7 @@ const LEARN_MODULES = {
       {
         id:'gf3', title:'Material Issuance Slip — MET F/03',
         desc:'Stores से material लेने का proper process — तीन signatures mandatory।',
-        date:'Effective: 10.12.2025 | Issue 01', sop:'GLS/MET/F/03', audio:false, video:false, live:false,
+        date:'Effective: 10.12.2025 | Issue 01', sop:'MET/F/03', audio:false, video:false, live:false,
         content:{
           category:'📝 Material Issuance Slip Process',
           points:[
@@ -17111,11 +17176,11 @@ const LEARN_MODULES = {
       {
         id:'gf4', title:'Blade Record — MET F/12 (Lutz, Stanley, Olfa)',
         desc:'Daily blade consumption tracking — 4 types, daily issuance और balance।',
-        date:'Effective: 01.06.2022', sop:'GLS/MET/F/12', audio:false, video:false, live:false,
+        date:'Effective: 01.06.2022', sop:'MET/F/12', audio:false, video:false, live:false,
         content:{
           category:'🔪 Blade Record — Daily Tracking',
           points:[
-            { icon:'🔵', label:'Blade Types at GLS', text:'1. Lutz Blade (43x22.2mm) — Main slitting blade\n2. Paper Cutter Blade\n3. Stanley Cutter 9mm\n4. Olfa Cutter Blade 25mm' },
+            { icon:'🔵', label:'Blade Types at MET Power', text:'1. Lutz Blade (43x22.2mm) — Main slitting blade\n2. Paper Cutter Blade\n3. Stanley Cutter 9mm\n4. Olfa Cutter Blade 25mm' },
             { icon:'📊', label:'Daily Columns', text:'Opening Stock | Issued by Store | Return to Store | Issued to M/c (Day) | Issued to M/c (Night) | Balance Stock' },
             { icon:'📈', label:'SAP Integration', text:'Movement Type 201 = Goods Issue to Cost Center in SAP. हर issuance documented = cost tracked.' },
             { icon:'🔢', label:'Replenishment', text:'Lutz blades — batches of 200-500. नीचे zero होने से पहले order करो। Lead time 2-3 days.' },
@@ -17125,9 +17190,9 @@ const LEARN_MODULES = {
         }
       },
       {
-        id:'gf5', title:'Audit and NCR Process (GLS GEN F-01 and F-02)',
+        id:'gf5', title:'Audit and NCR Process (MET Power GEN F-01 and F-02)',
         desc:'Internal audit kaise hota hai, observation kya hota hai, NCR kaise close hoti hai।',
-        date:'Audit No. 01 — 10.01.2023', sop:'GLS/GEN/F/01 and F/02', audio:false, video:false, live:false,
+        date:'Audit No. 01 — 10.01.2023', sop:'MET/GEN/F/01 and F/02', audio:false, video:false, live:false,
         content:{
           category:'🔍 Audit and NCR Process',
           points:[
@@ -17141,11 +17206,11 @@ const LEARN_MODULES = {
         }
       },
       {
-        id:'gf6', title:'Complete GLS MET Document Master List (GLS/MET/ML/01)',
+        id:'gf6', title:'Complete MET Power MET Document Master List (MET/ML/01)',
         desc:'Metalliser department के सभी SOPs, Work Instructions, और Formats की official list।',
-        date:'Rev. Date: 07.02.2026 | Issue 01', sop:'GLS/MET/ML/01', audio:false, video:false, live:false,
+        date:'Rev. Date: 07.02.2026 | Issue 01', sop:'MET/ML/01', audio:false, video:false, live:false,
         content:{
-          category:'📚 Master List — All GLS MET Documents',
+          category:'📚 Master List — All MET Power MET Documents',
           points:[
             { icon:'📋', label:'SOPs (10 total)', text:'SOP/01: Flow Chart | SOP/02: Jumbo Movement | SOP/03: Operating Parameters | SOP/06: OD Set | SOP/07: Stop Diameter | SOP/09: Slitting Ripple Free | SOP/10: Al Dust Disposal' },
             { icon:'🔧', label:'WI — Metalliser (01 to 26)', text:'Startup, Shutdown, Bare Film Selection, Boat Change, Moving Parts Safety, Drum/Shield Cleaning, Film Threading, Roll Loading, Quality Inspection, AlOx Handling, Met Waste Reduction, SAP Entry' },
@@ -17153,7 +17218,7 @@ const LEARN_MODULES = {
             { icon:'📒', label:'Formats (F/01 to F/12)', text:'F/01: Met Logbook | F/02: Slitter Logbook | F/03: Issuance Slip | F/04-05: Planning | F/06: Boat Trial | F/07-11: PM Checklists | F/12: Blade Record' },
             { icon:'💡', label:'Custodian and Retention', text:'Custodian = HOD. Retention = 1 Year. Effective Date: 01.06.2022. All documents controlled!' },
           ],
-          rule:'यह GLS का official document list है। इसी के according काम करना है — कोई unofficial document valid नहीं!'
+          rule:'यह MET Power का official document list है। इसी के according काम करना है — कोई unofficial document valid नहीं!'
         }
       },
     ]
@@ -17548,7 +17613,7 @@ function renderModuleContent(moduleId, contentType, hasAccess){
     const accessible = hasAccess || isPreview || mod.isFree;
     const available = contentType==='audio'?lesson.audio : contentType==='video'?lesson.video : lesson.live;
 
-    // GLS modules with real content — show infographic card instead of audio/video buttons
+    // MET Power modules with real content — show infographic card instead of audio/video buttons
     if(mod.gls && lesson.content && (accessible || isPreview)){
       const c = lesson.content;
       html += `<div class="lesson-card gls-lesson-card" style="border-color:${modColor}44;margin-bottom:14px">
@@ -17911,7 +17976,7 @@ async function registerFingerprint(userName, userId){
     const cred = await navigator.credentials.create({
       publicKey:{
         challenge,
-        rp:{ name:'GLS MP System', id: location.hostname },
+        rp:{ name:'MET Power System', id: location.hostname },
         user:{
           id: new TextEncoder().encode(userId||'mp_user'),
           name: userName,
@@ -18650,7 +18715,7 @@ async function saveTodo(editId){
         if(emp && emp.phone && emp.phone.length === 10){
           const prioLabel = priority==='high' ? '🔴 Urgent' : priority==='low' ? '🟢 Low' : '🟡 Normal';
           const dueFmt = dueDate ? new Date(dueDate).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'}) : '';
-          let waMsg = `📌 *GLS Polyfilms — Task Assigned*\n\n`;
+          let waMsg = `📌 *MET Power — Task Assigned*\n\n`;
           waMsg += `*${emp.name}*, आपको यह काम पूरा करना है`;
           if(dueFmt) waMsg += ` *${dueFmt}* तक`;
           waMsg += `:\n\n`;

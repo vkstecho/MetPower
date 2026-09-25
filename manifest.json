@@ -1,7 +1,7 @@
 {
   "name": "MET Power",
   "short_name": "MET Power",
-  "description": "GLS Polyfilms Metalliser department manpower & shift management",
+  "description": "MET Power Metalliser department manpower & shift management",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
