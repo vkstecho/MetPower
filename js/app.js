@@ -851,6 +851,34 @@ function getEmps(){
   if(cid==='ALL') return all;
   return all.filter(e=>_normCompanyId(e.companyId)===cid);
 }
+
+
+/**
+ * Find active employee who already owns this 10-digit mobile (different emp).
+ * Returns { emp, otherTeam } or null.
+ * otherTeam = true when owner is under a different manager than current user.
+ */
+function _findPhoneConflict(phone, excludeEmpId, excludeEmpCode){
+  const key = _normMobileKey(phone);
+  if(!key || key.length !== 10) return null;
+  const myMgr = (typeof SESSION !== 'undefined' && SESSION.role === 'manager' && SESSION.mobile)
+    ? _normMobileKey(SESSION.mobile) : null;
+  const emps = (typeof getEmps === 'function' ? getEmps() : []) || [];
+  for(const e of emps){
+    if(!e || e.status === 'resigned') continue;
+    if(excludeEmpId && e.id === excludeEmpId) continue;
+    if(excludeEmpCode && e.empId && String(e.empId).trim().toUpperCase() === String(excludeEmpCode).trim().toUpperCase()) continue;
+    const p = _normMobileKey(e.phone);
+    if(p !== key) continue;
+    const otherTeam = !!(myMgr && e.managerId && e.managerId !== myMgr);
+    // Also treat as other-team if current manager and owner has no managerId but different person
+    // or if owner is under any other manager
+    const crossTeam = otherTeam || (myMgr && e.managerId && e.managerId !== myMgr) ||
+      (myMgr && !e.managerId && e.id); // orphan under admin still blocks reuse by manager
+    return { emp: e, otherTeam: !!otherTeam || (myMgr && e.managerId && e.managerId !== myMgr) };
+  }
+  return null;
+}
 // ════════════════════════════════════════
 // SHIFT & MACHINE CONFIGURATION (per-Manager, GLS included)
 // ════════════════════════════════════════
@@ -3818,6 +3846,7 @@ async function doExtendAccess(){
 let _currentTab='home';
 
 function _goTabDirect(t){
+  const prev = _currentTab;
   _currentTab=t;
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('on'));
   const el=document.getElementById('tab-'+t); if(el) el.classList.add('on');
@@ -3839,7 +3868,73 @@ function _goTabDirect(t){
   // Run twice — once immediately, once after async renders settle.
   try{ if(typeof applyLang === 'function') applyLang(); }catch(e){}
   setTimeout(()=>{ try{ if(typeof _translateDOM === 'function') _translateDOM(); }catch(e){} }, 250);
+  // Android/browser Back: keep in-app history instead of closing the app
+  if(!_mpHistoryLock && prev !== t){
+    try{
+      _mpTabStack.push(prev);
+      if(_mpTabStack.length > 30) _mpTabStack.shift();
+      history.pushState({ mp:true, tab:t, kind:'tab' }, '');
+    }catch(e){}
+  }
 }
+
+// ── Hardware / browser Back button → last screen (not exit app) ──
+let _mpTabStack = [];
+let _mpHistoryLock = false;
+let _mpHistoryReady = false;
+
+function _mpCloseAnyOverlay(){
+  // Main modal
+  const ov = document.getElementById('overlay');
+  if(ov && ov.classList.contains('open')){ closeModal(); return true; }
+  // Named overlays used across the app
+  const ids = ['customRangeOverlay','excelUploadOverlay','smsSettingsOverlay','warnOverlay','teamExcelOverlay','playerOverlay'];
+  for(const id of ids){
+    const el = document.getElementById(id);
+    if(el && el.classList.contains('open')){
+      el.classList.remove('open');
+      return true;
+    }
+  }
+  // Dynamically created confirm / WA overlays
+  const dyn = document.getElementById('_waSeqOverlay') || document.querySelector('[style*="z-index:99998"]');
+  if(dyn && dyn.parentNode){ try{ dyn.parentNode.removeChild(dyn); }catch(e){} return true; }
+  // Learn screen
+  const learn = document.querySelector('.learn-screen');
+  if(learn && learn.style.display === 'block'){ learn.style.display = 'none'; return true; }
+  return false;
+}
+
+function _mpOnPopState(ev){
+  if(!_mpHistoryReady) return;
+  // 1) Close open modal / overlay first
+  if(_mpCloseAnyOverlay()){
+    try{ history.pushState({ mp:true, tab:_currentTab, kind:'guard' }, ''); }catch(e){}
+    return;
+  }
+  // 2) Go to previous in-app tab
+  if(_mpTabStack.length){
+    const prev = _mpTabStack.pop();
+    _mpHistoryLock = true;
+    try{ _goTabDirect(prev); } finally { _mpHistoryLock = false; }
+    try{ history.pushState({ mp:true, tab:prev, kind:'tab' }, ''); }catch(e){}
+    return;
+  }
+  // 3) If already at root tab — stay in app (re-push guard state so Back does not exit)
+  try{ history.pushState({ mp:true, tab:_currentTab, kind:'guard' }, ''); }catch(e){}
+}
+
+function _mpInitHistory(){
+  if(_mpHistoryReady) return;
+  _mpHistoryReady = true;
+  try{ history.replaceState({ mp:true, tab:_currentTab||'home', kind:'root' }, ''); }catch(e){}
+  try{ history.pushState({ mp:true, tab:_currentTab||'home', kind:'guard' }, ''); }catch(e){}
+  window.addEventListener('popstate', _mpOnPopState);
+}
+
+// Patch openModal / closeModal for history stack
+const _openModalOrig_ref = 'function openModal(html){';
+
 
 function goTab(t){
   // Warn if leaving schedule tab with unsaved changes
@@ -3877,6 +3972,7 @@ function renderAll(){
     updatePendingBadge();
     updateTodoBadge();
     _updateSchedAdminVisibility();
+    try{ _mpInitHistory(); }catch(e){}
   }catch(e){
     console.error('[renderAll] error:', e);
     try{ toast('⚠️ Display error — कृपया page refresh करें'); }catch(te){}
@@ -8491,6 +8587,12 @@ async function _parseEmpUploadFile(file){
       // ── Designation — keep from Excel ──
       const desig = roleRaw ? (roleRaw.charAt(0).toUpperCase() + roleRaw.slice(1)) : (existing?.designation || 'Team Member');
 
+      // ── Duplicate mobile: already used by another employee / other team ──
+      let phoneConflict = null;
+      if(phone && phone.length === 10){
+        phoneConflict = _findPhoneConflict(phone, existing?.id, empCode);
+      }
+
       parsed.push({
         _isNew:    !existing,
         id:        existing ? existing.id : ('eu_' + Date.now() + '_' + Math.random().toString(36).slice(2,5)),
@@ -8503,8 +8605,28 @@ async function _parseEmpUploadFile(file){
         status:    existing ? (existing.status || 'active') : 'active',
         ms:        existing ? (existing.ms || Array(31).fill('D')) : Array(31).fill('D'),
         _rowNum:   i + 1,
+        _phoneConflict: !!phoneConflict,
+        _otherTeam: !!(phoneConflict && phoneConflict.otherTeam),
+        _conflictWith: phoneConflict ? (phoneConflict.emp.name || phoneConflict.emp.empId || '') : '',
+        _conflictMgr: phoneConflict && phoneConflict.emp.managerId ? phoneConflict.emp.managerId : '',
+        _skipSave: !!phoneConflict, // do not add/update if phone belongs to someone else
       });
     }
+
+    // Within-file duplicate phones: mark later rows as conflict
+    const seenPhone = new Map();
+    parsed.forEach(p => {
+      if(!p.phone || p.phone.length !== 10) return;
+      if(seenPhone.has(p.phone)){
+        p._phoneConflict = true;
+        p._otherTeam = p._otherTeam || false;
+        p._conflictWith = p._conflictWith || ('Row ' + seenPhone.get(p.phone));
+        p._skipSave = true;
+        p._fileDup = true;
+      } else {
+        seenPhone.set(p.phone, p._rowNum);
+      }
+    });
 
     _empUploadParsed = parsed;
 
@@ -8524,28 +8646,42 @@ async function _parseEmpUploadFile(file){
 }
 
 function _showEmpUploadPreview(parsed, errors){
-  const newCount = parsed.filter(p => p._isNew).length;
-  const updCount = parsed.length - newCount;
+  const okRows = parsed.filter(p => !p._skipSave);
+  const conflictRows = parsed.filter(p => p._skipSave);
+  const newCount = okRows.filter(p => p._isNew).length;
+  const updCount = okRows.length - newCount;
   const secColor = {'M1':'#f97316','M2':'#fb923c','S1':'#3b82f6','S2':'#60a5fa','SUP':'#a78bfa','MGR':'#22c55e'};
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
 
-  const rows = parsed.map(p => `
-    <tr style="border-bottom:1px solid var(--border2)">
-      <td style="padding:6px 8px;font-size:11px;font-weight:700;color:#fff">${escHtml(p.name)}</td>
+  const rows = parsed.map(p => {
+    const conflict = !!p._skipSave;
+    const badge = conflict
+      ? (p._otherTeam
+          ? `<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:rgba(244,63,94,.2);color:#fb7185">🚫 ${isEn?'Other team':'दूसरी team'}</span>`
+          : p._fileDup
+            ? `<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:rgba(244,63,94,.2);color:#fb7185">🚫 ${isEn?'Dup in file':'File में Dup'}</span>`
+            : `<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:rgba(244,63,94,.2);color:#fb7185">🚫 ${isEn?'Phone taken':'Phone लिया'}</span>`)
+      : `<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;${p._isNew?'background:rgba(34,197,94,.15);color:#22c55e':'background:rgba(59,130,246,.15);color:#60a5fa'}">${p._isNew ? '🆕 New' : '✏️ Update'}</span>`;
+    const tip = conflict
+      ? (isEn
+          ? `Mobile ${p.phone} already used by ${p._conflictWith||'another member'}${p._otherTeam?' (other team)':''}. Will NOT be saved.`
+          : `मोबाइल ${p.phone} पहले से ${p._conflictWith||'दूसरे member'} के पास है${p._otherTeam?' (दूसरी team)':''}. Save नहीं होगा।`)
+      : '';
+    return `
+    <tr style="border-bottom:1px solid var(--border2);${conflict?'background:rgba(244,63,94,.12);outline:1px solid rgba(244,63,94,.35);':''}" title="${escHtml(tip)}">
+      <td style="padding:6px 8px;font-size:11px;font-weight:700;color:${conflict?'#fda4af':'#fff'}">${escHtml(p.name)}${conflict?' ⚠️':''}</td>
       <td style="padding:6px 4px;font-size:10px;color:var(--muted2)">${escHtml(p.empId)}</td>
       <td style="padding:6px 4px;font-size:10px">
         <span style="background:${secColor[p.sec]||'#475569'}22;color:${secColor[p.sec]||'#94a3b8'};border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">${p.sec}</span>
       </td>
       <td style="padding:6px 4px;font-size:10px;color:var(--muted2)">${escHtml(p.mc)}</td>
       <td style="padding:6px 4px;font-size:10px;color:var(--muted2)">${p.woff}</td>
-      <td style="padding:6px 4px;font-size:10px;color:var(--muted2)">${p.phone||'—'}</td>
+      <td style="padding:6px 4px;font-size:10px;font-weight:${conflict?'800':'400'};color:${conflict?'#fb7185':'var(--muted2)'}">${p.phone||'—'}${conflict?' ⛔':''}</td>
       <td style="padding:6px 4px;font-size:10px;color:${p.monthlySalary?'#fbbf24':'var(--muted2)'};font-weight:${p.monthlySalary?'700':'400'}">${p.monthlySalary?'₹'+Number(p.monthlySalary).toLocaleString('en-IN'):'—'}</td>
       <td style="padding:6px 4px;font-size:10px;color:${p.joiningDate?'#34d399':'var(--muted2)'}">${p.joiningDate ? new Date(p.joiningDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—'}</td>
-      <td style="padding:6px 4px;text-align:center">
-        <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;${p._isNew?'background:rgba(34,197,94,.15);color:#22c55e':'background:rgba(59,130,246,.15);color:#60a5fa'}">
-          ${p._isNew ? '🆕 New' : '✏️ Update'}
-        </span>
-      </td>
-    </tr>`).join('');
+      <td style="padding:6px 4px;text-align:center">${badge}</td>
+    </tr>`;
+  }).join('');
 
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">👁️ Preview — Save करने से पहले देखें</div>
@@ -8561,12 +8697,23 @@ function _showEmpUploadPreview(parsed, errors){
         <div style="font-size:10px;color:var(--muted2)">Update होंगे</div>
       </div>
       <div style="flex:1;background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.2);border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:22px;font-weight:900;color:#f97316">${parsed.length}</div>
-        <div style="font-size:10px;color:var(--muted2)">कुल</div>
+        <div style="font-size:22px;font-weight:900;color:#f97316">${okRows.length}</div>
+        <div style="font-size:10px;color:var(--muted2)">${isEn?'OK to save':'सेव होंगे'}</div>
       </div>
+      ${conflictRows.length?`<div style="flex:1;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:900;color:#fb7185">${conflictRows.length}</div>
+        <div style="font-size:10px;color:var(--muted2)">${isEn?'Blocked':'ब्लॉक'}</div>
+      </div>`:''}
     </div>
 
     ${errors.length ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px;font-size:11px;color:#f87171;margin-bottom:12px">⚠️ ${errors.length} row(s) skip हुई: ${escHtml(errors.slice(0,3).join(', '))}${errors.length>3?' ...':''}</div>` : ''}
+    ${conflictRows.length ? `<div style="background:rgba(244,63,94,.12);border:1.5px solid rgba(244,63,94,.4);border-radius:10px;padding:12px;font-size:12px;color:#fda4af;margin-bottom:12px;line-height:1.5">
+      <b style="color:#fb7185">🚫 ${conflictRows.length} ${isEn?'row(s) blocked — mobile already used':'row(s) ब्लॉक — मोबाइल पहले से इस्तेमाल'}</b><br>
+      ${isEn
+        ? 'These members will <b>not</b> be added/updated because their mobile number belongs to another employee (often another team). Highlighted in red below.'
+        : 'ये members <b>add/update नहीं</b> होंगे क्योंकि उनका मोबाइल नंबर दूसरे employee (अक्सर दूसरी team) के पास है। नीचे red में highlight हैं।'}
+      <div style="margin-top:6px;font-size:11px;opacity:.9">${conflictRows.slice(0,5).map(p=>escHtml(p.name)+' ('+(p.phone||'')+') → '+escHtml(p._conflictWith||'?')).join('<br>')}${conflictRows.length>5?'<br>…':''}</div>
+    </div>` : ''}
 
     <!-- Data table -->
     <div style="overflow-x:auto;overflow-y:auto;max-height:280px;border:1px solid var(--border2);border-radius:10px;margin-bottom:14px">
@@ -8608,8 +8755,9 @@ async function _confirmEmpUpload(){
   // Fetch current data to preserve blank fields
   const existingEmps = getEmps();
 
-  let saved = 0, failed = 0;
+  let saved = 0, failed = 0, skipped = 0;
   for(const emp of _empUploadParsed){
+    if(emp._skipSave){ skipped++; continue; }
     try{
       const existing = existingEmps.find(e => e.id === emp.id) || {};
 
@@ -8662,7 +8810,11 @@ async function _confirmEmpUpload(){
 
   _empUploadParsed = [];
   closeModal();
-  toast(`✅ ${saved} कर्मचारी save हो गए!${failed ? ' ' + failed + ' failed.' : ''}`);
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
+  let msg = isEn ? `✅ ${saved} employees saved!` : `✅ ${saved} कर्मचारी save हो गए!`;
+  if(skipped) msg += isEn ? ` ${skipped} blocked (duplicate mobile).` : ` ${skipped} ब्लॉक (duplicate mobile)।`;
+  if(failed) msg += isEn ? ` ${failed} failed.` : ` ${failed} failed.`;
+  toast(msg);
 }
 
 // ════════════════════════════════════════
@@ -8897,6 +9049,29 @@ function _processBulkImportRows(rows){
     });
 
     const existing = existingByCode[code];
+
+    // Block mobiles already used by another employee / other team
+    let phoneConflict = null;
+    if(mobile){
+      phoneConflict = _findPhoneConflict(mobile, existing?.id, code);
+    }
+
+    if(phoneConflict){
+      invalidCount++;
+      _bulkImportParsed.push({
+        name, code, designation, machine, resp,
+        salary: salaryRaw, mobile, joiningDate, dob, woff,
+        sec: _mapMachineToSec(machine, designation),
+        shiftsByDate,
+        existingId: existing ? existing.id : null,
+        _skipSave: true,
+        _phoneConflict: true,
+        _otherTeam: !!phoneConflict.otherTeam,
+        _conflictWith: phoneConflict.emp.name || phoneConflict.emp.empId || ''
+      });
+      return;
+    }
+
     if(existing) updateCount++; else createCount++;
 
     _bulkImportParsed.push({
@@ -8908,22 +9083,41 @@ function _processBulkImportRows(rows){
     });
   });
 
-  if(!_bulkImportParsed.length){
+  // Within-file mobile dups
+  const seenMob = new Map();
+  _bulkImportParsed.forEach(p=>{
+    if(!p.mobile) return;
+    if(seenMob.has(p.mobile)){
+      p._skipSave = true; p._phoneConflict = true; p._fileDup = true;
+      p._conflictWith = p._conflictWith || ('file:'+seenMob.get(p.mobile));
+    } else seenMob.set(p.mobile, p.code);
+  });
+
+  if(!_bulkImportParsed.filter(p=>!p._skipSave).length){
+    const blocked = _bulkImportParsed.filter(p=>p._skipSave);
     previewEl.innerHTML=`<div style="color:var(--lv);padding:12px;font-size:12px">
-      ❌ No valid rows. ${invalidCount?invalidCount+' missing Name/Emp ID. ':''}
+      ❌ No valid rows. ${invalidCount?invalidCount+' missing Name/Emp ID or blocked mobile. ':''}
+      ${blocked.length?`<br>🚫 ${blocked.length} blocked (duplicate mobile): `+blocked.slice(0,5).map(b=>b.name+' ('+b.mobile+')').join(', '):''}
     </div>`;
     return;
   }
 
-  const withShifts = _bulkImportParsed.filter(e=>Object.keys(e.shiftsByDate||{}).length).length;
+  const okBulk = _bulkImportParsed.filter(e=>!e._skipSave);
+  const blockedBulk = _bulkImportParsed.filter(e=>e._skipSave);
+  const withShifts = okBulk.filter(e=>Object.keys(e.shiftsByDate||{}).length).length;
   const months = new Set();
-  _bulkImportParsed.forEach(e=>Object.keys(e.shiftsByDate||{}).forEach(d=>months.add(d.substring(0,7))));
-  const mobileCount=_bulkImportParsed.filter(e=>e.mobile).length;
+  okBulk.forEach(e=>Object.keys(e.shiftsByDate||{}).forEach(d=>months.add(d.substring(0,7))));
+  const mobileCount=okBulk.filter(e=>e.mobile).length;
 
   previewEl.innerHTML=`
     <div style="font-size:13px;font-weight:800;color:#22c55e;margin-bottom:8px">
-      ✅ ${_bulkImportParsed.length} employees ready
+      ✅ ${okBulk.length} employees ready${blockedBulk.length?` · <span style="color:#fb7185">🚫 ${blockedBulk.length} blocked</span>`:''}
     </div>
+    ${blockedBulk.length?`<div style="background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.35);border-radius:8px;padding:10px;font-size:11px;color:#fda4af;margin-bottom:10px;line-height:1.5">
+      🚫 Mobile already used (other team / duplicate) — will NOT import:<br>
+      ${blockedBulk.slice(0,6).map(e=>`<b style="color:#fb7185">${e.name}</b> (${e.mobile}) → ${e._conflictWith||'?'}`).join('<br>')}
+      ${blockedBulk.length>6?'<br>…':''}
+    </div>`:''}
     <div style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:10px">
       🆕 Create: <b>${createCount}</b> &nbsp;·&nbsp; 🔄 Update: <b>${updateCount}</b><br>
       ${dateCols.length?`📅 Shift date columns: <b>${dateCols.length}</b> (${dateCols[0].iso} → ${dateCols[dateCols.length-1].iso})<br>`:''}
@@ -8955,8 +9149,10 @@ async function confirmBulkImportTeam(){
   const empIdToInternal = {};
   getEmps().forEach(e=>{ if(e.empId) empIdToInternal[String(e.empId).trim()]=e.id; });
 
+  let skippedPhone=0;
   for(let i=0;i<_bulkImportParsed.length;i++){
     const e=_bulkImportParsed[i];
+    if(e._skipSave){ skippedPhone++; continue; }
     try{
       let id = e.existingId;
       const sec = e.sec || _mapMachineToSec(e.machine, e.designation);
@@ -9067,34 +9263,92 @@ async function confirmBulkImportTeam(){
   try{ if(typeof renderSchedule==='function') renderSchedule(); }catch(e){}
 }
 
+function _normalizeMachineLabel(raw){
+  const s = String(raw||'').trim();
+  if(!s) return '';
+  // M1 / m1 / M-1 → M-1; S2 → S-2
+  let m = s.match(/^M[\s\-]?(\d+)$/i);
+  if(m) return 'M-'+m[1];
+  m = s.match(/^S[\s\-]?(\d+)$/i);
+  if(m) return 'S-'+m[1];
+  // Metalliser / Slitter umbrella keep title-case
+  if(/^metalliser$/i.test(s) || /^met$/i.test(s)) return 'Metalliser';
+  if(/^slitter$/i.test(s) || /^slit$/i.test(s)) return 'Slitter';
+  if(/^s\.?i\.?$/i.test(s) || /^supervisor$/i.test(s) || /^engg$/i.test(s) || /^engineer$/i.test(s)) return 'S.I.';
+  if(/^manager$/i.test(s) || /^mgr$/i.test(s)) return 'Manager';
+  return s;
+}
+
+/** Derive internal section key (M1, S2, SUP, MGR…) from machine label. */
+function _secFromMachine(machine, designation){
+  if(typeof _mapMachineToSec === 'function'){
+    const s = _mapMachineToSec(machine, designation||'');
+    if(s && s !== 'STAFF') return s;
+  }
+  const u = String(machine||'').trim().toUpperCase().replace(/\s+/g,'');
+  if(/^M-?1$/.test(u) || u==='METALLISER' || u==='MET') return 'M1';
+  if(/^M-?2$/.test(u)) return 'M2';
+  if(/^M-?(\d+)$/.test(u)) return 'M'+RegExp.$1;
+  if(/^S-?1$/.test(u) || u==='SLITTER' || u==='SLIT') return 'S1';
+  if(/^S-?2$/.test(u)) return 'S2';
+  if(/^S-?(\d+)$/.test(u)) return 'S'+RegExp.$1;
+  if(/S\.?I|SUP|ENGG|ENGINEER/.test(u)) return 'SUP';
+  if(/MGR|MANAGER/.test(u)) return 'MGR';
+  return 'M1';
+}
+
 function _buildSecOptions(selectedSec){
   const cfg=getShiftConfigSync();
   const opts=[];
-  // Sections based on Machines: Metalliser (M1/M2), Slitters (S1/S2/...), Engineers (SUP), Manager
-  (cfg.metallisers||[]).forEach(m=>opts.push(`<option value="${m}"${selectedSec===m?' selected':''}>${secName(m)||m}</option>`));
-  (cfg.slitters||[]).forEach(s=>opts.push(`<option value="${s}"${selectedSec===s?' selected':''}>${secName(s)||s}</option>`));
+  // Kept for edit form fallback / admin — prefer Machine field in Add form
+  (cfg.metallisers||[]).forEach(m=>{
+    const key = String(m).replace(/^M[\s\-]?(\d+)$/i,'M$1').toUpperCase().replace(/[^A-Z0-9]/g,'') || m;
+    opts.push(`<option value="${key}"${selectedSec===key||selectedSec===m?' selected':''}>${secName(key)||_normalizeMachineLabel(m)}</option>`);
+  });
+  (cfg.slitters||[]).forEach(s=>{
+    const key = String(s).replace(/^S[\s\-]?(\d+)$/i,'S$1').toUpperCase().replace(/[^A-Z0-9]/g,'') || s;
+    opts.push(`<option value="${key}"${selectedSec===key||selectedSec===s?' selected':''}>${secName(key)||_normalizeMachineLabel(s)}</option>`);
+  });
   opts.push(`<option value="SUP"${selectedSec==='SUP'?' selected':''}>${secName('SUP')||'Engineers / Supervisor'}</option>`);
   opts.push(`<option value="MGR"${selectedSec==='MGR'?' selected':''}>${secName('MGR')||'Manager'}</option>`);
   return opts.join('');
 }
+
+/**
+ * Machine dropdown — ONLY machines from manager Profile (Shift & Machine Settings).
+ * Display: M-1, M-2, Metalliser, S-1, S-2, Slitter (no hardcoded S-3/S-4, no M1+M-1 duplicates).
+ */
 function _buildMachineOptions(selectedMc){
   const cfg=getShiftConfigSync();
-  const machines=new Set();
-  (cfg.metallisers||[]).forEach(m=>{
-    const label=secName(m)||m;
-    // e.g. M1 → M-1, also keep raw
-    machines.add(m.replace(/^M(\d)$/i,'M-$1'));
-    machines.add(m);
-    if(/^M/i.test(m)) machines.add('Metalliser');
-  });
-  (cfg.slitters||[]).forEach(s=>{
-    machines.add(s.replace(/^S(\d)$/i,'S-$1'));
-    machines.add(s);
-  });
-  // Common fixed options
-  ['M-1','M-2','Metalliser','S-1','S-2','S-3','S-4','S.I.','ENGG'].forEach(x=>machines.add(x));
-  const sorted=[...machines].sort((a,b)=>String(a).localeCompare(String(b)));
-  return sorted.map(m=>`<option value="${m}"${selectedMc===m?' selected':''}>${m}</option>`).join('');
+  const ordered = [];
+  const seen = new Set();
+  const add = (label) => {
+    const L = _normalizeMachineLabel(label);
+    if(!L || seen.has(L)) return;
+    seen.add(L);
+    ordered.push(L);
+  };
+  const mets = (cfg.metallisers||[]).map(m=>String(m||'').trim()).filter(Boolean);
+  const slits = (cfg.slitters||[]).map(s=>String(s||'').trim()).filter(Boolean);
+  mets.forEach(m=>add(m));
+  if(mets.length) add('Metalliser');
+  slits.forEach(s=>add(s));
+  if(slits.length) add('Slitter');
+  // Supervisor / Engineer machine only if no machines at all (still allow assigning eng staff)
+  if(!ordered.length){
+    add('M-1'); add('M-2'); add('Metalliser'); add('S-1'); add('S-2'); add('Slitter');
+  }
+  // Always allow S.I. for engineers/supervisors (not fake S-3/S-4)
+  add('S.I.');
+  // If editing and current value not in list, keep it selectable
+  if(selectedMc){
+    const cur = _normalizeMachineLabel(selectedMc) || selectedMc;
+    if(cur && !seen.has(cur)){ ordered.unshift(cur); seen.add(cur); }
+  }
+  return ordered.map(m=>{
+    const sel = selectedMc && (_normalizeMachineLabel(selectedMc)===m || selectedMc===m) ? ' selected' : '';
+    return `<option value="${m}"${sel}>${m}</option>`;
+  }).join('');
 }
 function _buildDesignationOptions(selected){
   const list=['Operator','Ass. Operator','Team Member','Sr. Team Member','Jr. Team Member','Trainee','Engineer','Jr. Engineer','Officer','Supervisor','Sr. Supervisor','Manager','Shift Engineer','Admin'];
@@ -9105,7 +9359,7 @@ function _buildRespOptions(selected){
   return list.map(r=>`<option value="${r}"${selected===r?' selected':''}>${r}</option>`).join('');
 }
 function openAddEmpForm(){
-  const secOpts=_buildSecOptions(null);
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
   const mcOpts=_buildMachineOptions(null);
   const desigOpts=_buildDesignationOptions('Team Member');
   const respOpts=_buildRespOptions('Operation');
@@ -9117,23 +9371,21 @@ function openAddEmpForm(){
   </div>
   <div class="grid2">
     <div class="field"><label>Designation</label><select id="ne_designation">${desigOpts}</select></div>
-    <div class="field"><label>${typeof t==='function'?t('सेक्शन'):'Section'}</label><select id="ne_sec">${secOpts}</select></div>
-  </div>
-  <div class="grid2">
     <div class="field"><label>${typeof t==='function'?t('मशीन'):'Machine'}</label><select id="ne_mc">${mcOpts}</select></div>
-    <div class="field"><label>${typeof t==='function'?t('ज़िम्मेदारी'):'Responsibility'}</label><select id="ne_resp">${respOpts}</select></div>
   </div>
   <div class="grid2">
+    <div class="field"><label>${typeof t==='function'?t('ज़िम्मेदारी'):'Responsibility'}</label><select id="ne_resp">${respOpts}</select></div>
     <div class="field"><label>Week Off</label>
-      <select id="ne_woff"><option>MON</option><option>TUE</option><option>WED</option><option>THU</option><option>FRI</option><option>SAT</option><option>SUN</option></select>
+      <select id="ne_woff"><option>MON</option><option>TUE</option><option>WED</option><option>THU</option><option>FRI</option><option>SAT</option><option selected>SUN</option></select>
     </div>
-    <div class="field"><label>📱 ${typeof t==='function'?t('मोबाइल नंबर'):'Mobile'} (SMS)</label><input class="inp-field" id="ne_phone" placeholder="10-digit number" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
   </div>
+  <div class="field"><label>📱 ${typeof t==='function'?t('मोबाइल नंबर'):'Mobile'} (SMS)</label><input class="inp-field" id="ne_phone" placeholder="10-digit number" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')"></div>
   <div class="grid2">
     <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ne_joining" type="date"></div>
     <div class="field"><label>🎂 Date of Birth</label><input class="inp-field" id="ne_dob" type="date"></div>
   </div>
   <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ne_salary" type="number" min="0" step="1" placeholder="e.g. 15000"></div>
+  <div style="font-size:11px;color:var(--muted2);margin:4px 0 12px">${isEn?'Section is set automatically from Machine.':'Section मशीन से अपने आप सेट होगी।'}</div>
   <button class="submit-btn" onclick="addEmployee()">✅ ${typeof t==='function'?t('जोड़ें'):'Add'}</button>
   <button class="cancel-btn" onclick="closeModal()">${typeof t==='function'?t('रद्द करें'):'Cancel'}</button>`);
 }
@@ -9141,7 +9393,6 @@ function openAddEmpForm(){
 async function addEmployee(){
   const name=document.getElementById('ne_name').value.trim().toUpperCase();
   const code=document.getElementById('ne_code').value.trim();
-  const sec=document.getElementById('ne_sec').value;
   const mc=document.getElementById('ne_mc').value.trim();
   const resp=document.getElementById('ne_resp').value.trim();
   const woff=document.getElementById('ne_woff').value;
@@ -9150,9 +9401,37 @@ async function addEmployee(){
   const joiningDate=document.getElementById('ne_joining')?.value?.trim()||'';
   const dob=document.getElementById('ne_dob')?.value?.trim()||'';
   const salaryRaw=document.getElementById('ne_salary')?.value?.trim();
+  // Section derived from Machine (no separate Section field)
+  const sec=_secFromMachine(mc, designation);
   if(!name||!code){ toast('नाम और कोड जरूरी है'); return; }
+  if(!mc){ toast((typeof _lang!=='undefined'&&_lang==='en')?'⚠️ Select a Machine':'⚠️ मशीन चुनें'); return; }
   // Only Admin can add Manager-section employees
   if(sec==='MGR' && !isAdmin()){ toast('❌ Manager section में सिर्फ Admin जोड़ सकते हैं'); return; }
+  // Duplicate employee code
+  const codeClash = (getEmps()||[]).find(e => e.status !== 'resigned' && e.empId && String(e.empId).trim().toUpperCase() === code.toUpperCase());
+  if(codeClash){
+    toast((typeof _lang!=='undefined'&&_lang==='en')
+      ? `⚠️ Employee code already exists: ${codeClash.name}`
+      : `⚠️ Employee code पहले से है: ${codeClash.name}`);
+    return;
+  }
+  // Duplicate mobile (especially other team)
+  if(phone && phone.length === 10){
+    const clash = _findPhoneConflict(phone, null, code);
+    if(clash){
+      const nm = clash.emp.name || clash.emp.empId || '';
+      if(clash.otherTeam){
+        toast((typeof _lang!=='undefined'&&_lang==='en')
+          ? `📱 Mobile already belongs to another team's member (${nm}). Not added.`
+          : `📱 यह मोबाइल नंबर पहले से दूसरे team के member (${nm}) के पास है। Add नहीं किया।`);
+      } else {
+        toast((typeof _lang!=='undefined'&&_lang==='en')
+          ? `📱 Mobile already registered to ${nm}. Not added.`
+          : `📱 यह मोबाइल नंबर पहले से ${nm} के पास registered है। Add नहीं किया।`);
+      }
+      return;
+    }
+  }
   const id='e'+Date.now().toString(36);
   const emp={id,name,empId:code,sec,mc,resp,woff,status:'active',
     designation,
@@ -9165,76 +9444,66 @@ async function addEmployee(){
   if(dob) emp.dob=dob;
   if(salaryRaw) emp.monthlySalary=parseFloat(salaryRaw);
   await fbUpdate(`employees/${id}`,emp);
-  closeModal(); toast(`✅ ${name} जोड़ा गया`);
+  closeModal();
+  toast((typeof _lang!=='undefined'&&_lang==='en') ? `✅ ${name} added` : `✅ ${name} जोड़ा गया`);
 }
 
 function openEditEmpForm(empId){
   const e=getEmps().find(x=>x.id===empId); if(!e) return;
-  const secOpts=_buildSecOptions(e.sec);
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
   const mcOpts=_buildMachineOptions(e.mc||'');
   const desigOpts=_buildDesignationOptions(e.designation||'');
   const respOpts=_buildRespOptions(e.resp||'');
-  // Ensure current free-text machine/resp appear in dropdown if not in list
-  let mcExtra='';
-  if(e.mc && !mcOpts.includes(`value="${e.mc}"`)) mcExtra=`<option value="${e.mc}" selected>${e.mc}</option>`;
   let respExtra='';
   if(e.resp && !respOpts.includes(`value="${e.resp}"`)) respExtra=`<option value="${e.resp}" selected>${e.resp}</option>`;
+  const statusSel = ['active','resigned'].map(s=>`<option value="${s}"${(e.status||'active')===s?' selected':''}>${s}</option>`).join('');
   openModal(`<div class="modal-handle"></div>
-  <div class="modal-title">✏️ ${e.name} संपादित करें</div>
+  <div class="modal-title">✏️ ${isEn?'Edit':'संपादित करें'} ${e.name}</div>
   <div class="grid2">
-    <div class="field"><label>नाम</label><input class="inp-field" id="ee_name" value="${e.name}"></div>
+    <div class="field"><label>${isEn?'Name':'नाम'}</label><input class="inp-field" id="ee_name" value="${e.name}"></div>
     <div class="field"><label>Employee Code / ID</label><input class="inp-field" id="ee_code" value="${e.empId||''}"></div>
   </div>
   <div class="grid2">
     <div class="field"><label>Designation</label><select id="ee_designation">${desigOpts}</select></div>
-    <div class="field"><label>सेक्शन</label><select id="ee_sec">${secOpts}</select></div>
+    <div class="field"><label>${isEn?'Machine':'मशीन'}</label><select id="ee_mc">${mcOpts}</select></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>मशीन</label><select id="ee_mc">${mcExtra}${mcOpts}</select></div>
-    <div class="field"><label>ज़िम्मेदारी</label><select id="ee_resp">${respExtra}${respOpts}</select></div>
-  </div>
-  <div class="grid2">
+    <div class="field"><label>${isEn?'Responsibility':'ज़िम्मेदारी'}</label><select id="ee_resp">${respExtra}${respOpts}</select></div>
     <div class="field"><label>Week Off</label>
-      <select id="ee_woff"><option${e.woff==='MON'?' selected':''}>MON</option><option${e.woff==='TUE'?' selected':''}>TUE</option><option${e.woff==='WED'?' selected':''}>WED</option><option${e.woff==='THU'?' selected':''}>THU</option><option${e.woff==='FRI'?' selected':''}>FRI</option><option${e.woff==='SAT'?' selected':''}>SAT</option><option${e.woff==='SUN'?' selected':''}>SUN</option></select>
+      <select id="ee_woff">${['MON','TUE','WED','THU','FRI','SAT','SUN'].map(d=>`<option${(e.woff||'SUN')===d?' selected':''}>${d}</option>`).join('')}</select>
     </div>
-    <div class="field"><label>📱 मोबाइल नंबर</label><input class="inp-field" id="ee_phone" value="${e.phone||''}" placeholder="10 अंक का नंबर" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\\D/g,'')"></div>
   </div>
+  <div class="field"><label>📱 ${isEn?'Mobile':'मोबाइल नंबर'}</label><input class="inp-field" id="ee_phone" value="${e.phone||''}" placeholder="10-digit" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')"></div>
   <div class="grid2">
     <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ee_joining" type="date" value="${e.joiningDate||''}"></div>
     <div class="field"><label>🎂 Date of Birth</label><input class="inp-field" id="ee_dob" type="date" value="${e.dob||''}"></div>
   </div>
   <div class="grid2">
-    <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ee_salary" type="number" value="${e.monthlySalary||''}" placeholder="e.g. 15000"></div>
-    <div class="field"><label>स्थिति</label>
-      <select id="ee_status"><option value="active"${e.status==='active'?' selected':''}>✅ Active</option><option value="resigned"${e.status==='resigned'?' selected':''}>🚪 Resigned</option></select>
-    </div>
+    <div class="field"><label>💰 Monthly Salary (₹)</label><input class="inp-field" id="ee_salary" type="number" min="0" step="1" value="${e.monthlySalary||''}"></div>
+    <div class="field"><label>Status</label><select id="ee_status">${statusSel}</select></div>
   </div>
-  <div class="field"><label>🔐 App Access Level</label>
-    <select id="ee_accessLevel">
-      <option value="worker"${(e.accessLevel||'worker')==='worker'?' selected':''}>👤 Worker — Basic view only</option>
-      <option value="manager"${(e.accessLevel||'')==='manager'?' selected':''}>🏅 Manager — All sections + Edit schedule</option>
-      <option value="supervisor"${(e.accessLevel||'')==='supervisor'?' selected':''}>👁️ Supervisor — View only, no edit</option>
-    </select>
-  </div>
-  <button class="submit-btn" onclick="saveEmployee('${empId}')">💾 सेव करें</button>
-  ${isAdminOrMgr()?`<button class="cancel-btn" style="margin-top:8px;color:#f43f5e;border-color:rgba(244,63,94,.3)" onclick="closeModal();confirmDelEmp('${empId}','${e.name.replace(/'/g,"\\'")}')">🗑️ Team से हटाएं</button>`:''}
-  <button class="cancel-btn" onclick="closeModal()">रद्द करें</button>`);
+  ${isAdmin()?`<div class="field"><label>Access Level</label><select id="ee_accessLevel"><option value="worker"${(e.accessLevel||'worker')==='worker'?' selected':''}>Worker</option><option value="manager"${e.accessLevel==='manager'?' selected':''}>Manager</option></select></div>`:'<input type="hidden" id="ee_accessLevel" value="'+(e.accessLevel||'worker')+'">'}
+  <div style="font-size:11px;color:var(--muted2);margin:4px 0 12px">${isEn?'Section updates automatically from Machine.':'Section मशीन से अपने आप अपडेट होगी।'}</div>
+  <button class="submit-btn" onclick="saveEmployee('${empId}')">💾 ${isEn?'Save':'सेव करें'}</button>
+  <button class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
 }
 
 async function saveEmployee(empId){
   const e=getEmps().find(x=>x.id===empId);
   // Manager cannot edit MGR section employees
   if(!isAdmin() && e && e.sec==='MGR'){ toast('❌ Manager section की editing सिर्फ Admin कर सकता है'); return; }
+  const mcVal = document.getElementById('ee_mc').value.trim();
+  const desigVal = document.getElementById('ee_designation')?.value||'';
   const update = {
     name:        document.getElementById('ee_name').value.trim().toUpperCase(),
     empId:       document.getElementById('ee_code').value.trim(),
-    sec:         document.getElementById('ee_sec').value,
-    mc:          document.getElementById('ee_mc').value.trim(),
+    mc:          mcVal,
+    sec:         _secFromMachine(mcVal, desigVal),
     resp:        document.getElementById('ee_resp').value.trim(),
     woff:        document.getElementById('ee_woff').value,
     status:      document.getElementById('ee_status').value,
     phone:       document.getElementById('ee_phone').value.trim(),
-    designation: document.getElementById('ee_designation')?.value||'',
+    designation: desigVal,
     accessLevel: document.getElementById('ee_accessLevel')?.value||'worker',
   };
   // Manager cannot move employee to MGR section
@@ -9246,8 +9515,24 @@ async function saveEmployee(empId){
   if(dob)     update.dob           = dob;
   if(salary)  update.monthlySalary = parseFloat(salary);
   else if(salary==='') update.monthlySalary = null;
+  // Block phone if already used by another employee / other team
+  if(update.phone && update.phone.length === 10){
+    const clash = _findPhoneConflict(update.phone, empId, update.empId);
+    if(clash){
+      const nm = clash.emp.name || clash.emp.empId || '';
+      toast((typeof _lang!=='undefined'&&_lang==='en')
+        ? (clash.otherTeam
+            ? `📱 Mobile already belongs to another team's member (${nm}).`
+            : `📱 Mobile already registered to ${nm}.`)
+        : (clash.otherTeam
+            ? `📱 यह मोबाइल नंबर पहले से दूसरे team के member (${nm}) के पास है।`
+            : `📱 यह मोबाइल नंबर पहले से ${nm} के पास registered है।`));
+      return;
+    }
+  }
   await fbUpdate(`employees/${empId}`, update);
-  closeModal(); toast('✅ जानकारी अपडेट हो गई');
+  closeModal();
+  toast((typeof _lang!=='undefined'&&_lang==='en') ? '✅ Details updated' : '✅ जानकारी अपडेट हो गई');
 }
 
 function confirmDelEmp(id, name){
@@ -10399,6 +10684,7 @@ async function viewSecurityLog(){
 function openModal(html){
   document.getElementById('modalBody').innerHTML=`<div class="modal">${html}</div>`;
   document.getElementById('overlay').classList.add('open');
+  try{ history.pushState({ mp:true, tab:_currentTab, kind:'modal' }, ''); }catch(e){}
   // Translate all modal text when English is active
   if(typeof _lang !== 'undefined' && _lang === 'en'){
     setTimeout(()=>{
@@ -11045,6 +11331,34 @@ const _i18n_HI_EN = {
   'Schedule': 'Schedule',
   'Leave': 'Leave',
   'Team': 'Team',
+
+  // ── Schedule Builder / mixed labels (EN mode) ──
+  'सभी Section': 'All Sections',
+  'महीना चुनें': 'Select Month',
+  'तारीख रेंज': 'Date Range',
+  '📅 पूरा महीना': '📅 Full Month',
+  '🗓️ कस्टम तारीख': '🗓️ Custom Dates',
+  'से (From)': 'From',
+  'तक (To)': 'To',
+  'उदा. 11 से 20 — केवल ये दिन Schedule में दिखेंगे': 'e.g. 11 to 20 — only these days will appear in the schedule',
+  'कर्मचारी': 'Employee',
+  'नए कर्मचारी': 'New employees',
+  'कुल': 'Total',
+  'नाम और कोड जरूरी है': 'Name and code are required',
+  '❌ Manager section में सिर्फ Admin जोड़ सकते हैं': '❌ Only Admin can add Manager-section employees',
+  'जोड़ा गया': 'added',
+  '📱 यह मोबाइल नंबर पहले से दूसरे team के member के पास है': '📱 This mobile number already belongs to a member of another team',
+  '📱 यह मोबाइल नंबर पहले से registered है': '📱 This mobile number is already registered',
+  '🚫 Duplicate mobile — other team': '🚫 Duplicate mobile — other team',
+  '🚫 Duplicate mobile': '🚫 Duplicate mobile',
+  'कर्मचारी List Upload करें': 'Upload Employee List',
+  'Preview — Save करने से पहले देखें': 'Preview — review before Save',
+  'Confirm करें — Firebase में Save': 'Confirm — Save to Firebase',
+  'वापस': 'Back',
+  'row(s) skip हुई': 'row(s) skipped',
+  'कर्मचारी save हो गए!': 'employees saved!',
+  'यह मोबाइल नंबर दूसरे team में पहले से है': 'This mobile is already used in another team',
+  'File में Duplicate mobile': 'Duplicate mobile in file',
 
 };
 
@@ -11950,22 +12264,118 @@ function openScheduleBuilder(){
     months.push({key, label});
   }
   const monthOpts = months.map(m=>`<option value="${m.key}"${m.key===defaultKey?' selected':''}>${m.label}</option>`).join('');
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
+  const L = {
+    title: isEn ? '📋 Schedule Builder' : '📋 Schedule Builder',
+    month: isEn ? 'Select Month' : 'महीना चुनें',
+    section: isEn ? 'Section' : 'Section',
+    allSec: isEn ? 'All Sections' : 'सभी Section',
+    dateRange: isEn ? 'Date Range' : 'तारीख रेंज',
+    fullMonth: isEn ? '📅 Full Month' : '📅 पूरा महीना',
+    customDates: isEn ? '🗓️ Custom Dates' : '🗓️ कस्टम तारीख',
+    from: isEn ? 'From' : 'से (From)',
+    to: isEn ? 'To' : 'तक (To)',
+    hint: isEn ? 'e.g. 11 to 20 — only these days will appear in the schedule' : 'उदा. 11 से 20 — केवल ये दिन Schedule में दिखेंगे',
+    open: isEn ? '📋 Open Schedule' : '📋 Schedule खोलें',
+    cancel: isEn ? 'Cancel' : 'रद्द करें',
+  };
+  const secOpts = Object.entries(SEC).map(([k,v])=>{
+    const name = isEn ? (v.label||k) : (v.hi||v.label||k);
+    return `<option value="${k}">${name}</option>`;
+  }).join('');
   
   openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">📋 Schedule Builder</div>
-    <div class="field" style="margin-bottom:16px">
-      <label>महीना चुनें</label>
-      <select class="inp-field" id="sb_month">${monthOpts}</select>
+    <div class="modal-title">${L.title}</div>
+    <div class="field" style="margin-bottom:14px">
+      <label>${L.month}</label>
+      <select class="inp-field" id="sb_month" onchange="_sbUpdateDayOptions()">${monthOpts}</select>
     </div>
-    <div class="field" style="margin-bottom:16px">
-      <label>Section</label>
+    <div class="field" style="margin-bottom:14px">
+      <label>${L.section}</label>
       <select class="inp-field" id="sb_sec">
-        <option value="ALL">सभी Section</option>
-        ${Object.entries(SEC).map(([k,v])=>`<option value="${k}">${v.hi}</option>`).join('')}
+        <option value="ALL">${L.allSec}</option>
+        ${secOpts}
       </select>
     </div>
-    <button class="submit-btn" onclick="loadScheduleBuilder()">📋 Schedule खोलें</button>
-    <button class="cancel-btn" onclick="closeModal()">रद्द करें</button>`);
+    <div class="field" style="margin-bottom:10px">
+      <label>${L.dateRange}</label>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button type="button" id="sbRangeFull" class="sb-range-btn on" onclick="_sbSetRangeMode('full')"
+          style="flex:1;padding:10px 8px;border-radius:10px;border:1.5px solid var(--m1);background:rgba(249,115,22,.12);color:var(--m1);font-size:13px;font-weight:800;cursor:pointer">${L.fullMonth}</button>
+        <button type="button" id="sbRangeCustom" class="sb-range-btn" onclick="_sbSetRangeMode('custom')"
+          style="flex:1;padding:10px 8px;border-radius:10px;border:1.5px solid var(--border2);background:var(--card);color:var(--muted2);font-size:13px;font-weight:800;cursor:pointer">${L.customDates}</button>
+      </div>
+    </div>
+    <div id="sbCustomRangeFields" style="display:none;margin-bottom:14px">
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <div class="field" style="flex:1;margin:0">
+          <label style="font-size:12px">${L.from}</label>
+          <select class="inp-field" id="sb_dayFrom"></select>
+        </div>
+        <div style="padding-bottom:12px;color:var(--muted2);font-weight:800">→</div>
+        <div class="field" style="flex:1;margin:0">
+          <label style="font-size:12px">${L.to}</label>
+          <select class="inp-field" id="sb_dayTo"></select>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted2);margin-top:6px">${L.hint}</div>
+    </div>
+    <button class="submit-btn" onclick="loadScheduleBuilder()">${L.open}</button>
+    <button class="cancel-btn" onclick="closeModal()">${L.cancel}</button>`);
+  setTimeout(_sbUpdateDayOptions, 30);
+}
+
+let _sbRangeMode = 'full'; // 'full' | 'custom'
+
+function _sbSetRangeMode(mode){
+  _sbRangeMode = mode;
+  const fullBtn = document.getElementById('sbRangeFull');
+  const custBtn = document.getElementById('sbRangeCustom');
+  const fields = document.getElementById('sbCustomRangeFields');
+  if(!fullBtn || !custBtn || !fields) return;
+  if(mode === 'custom'){
+    fullBtn.style.borderColor = 'var(--border2)';
+    fullBtn.style.background = 'var(--card)';
+    fullBtn.style.color = 'var(--muted2)';
+    custBtn.style.borderColor = 'var(--m1)';
+    custBtn.style.background = 'rgba(249,115,22,.12)';
+    custBtn.style.color = 'var(--m1)';
+    fields.style.display = 'block';
+    _sbUpdateDayOptions();
+  } else {
+    custBtn.style.borderColor = 'var(--border2)';
+    custBtn.style.background = 'var(--card)';
+    custBtn.style.color = 'var(--muted2)';
+    fullBtn.style.borderColor = 'var(--m1)';
+    fullBtn.style.background = 'rgba(249,115,22,.12)';
+    fullBtn.style.color = 'var(--m1)';
+    fields.style.display = 'none';
+  }
+}
+
+function _sbUpdateDayOptions(){
+  const monthEl = document.getElementById('sb_month');
+  const fromEl = document.getElementById('sb_dayFrom');
+  const toEl = document.getElementById('sb_dayTo');
+  if(!monthEl || !fromEl || !toEl) return;
+  const [yr, mo] = monthEl.value.split('-').map(Number);
+  const dim = new Date(yr, mo, 0).getDate();
+  const curFrom = parseInt(fromEl.value, 10) || 1;
+  const curTo = parseInt(toEl.value, 10) || dim;
+  fromEl.innerHTML = Array.from({length: dim}, (_,i) => {
+    const d = i + 1;
+    return `<option value="${d}"${d===Math.min(curFrom,dim)?' selected':''}>${d}</option>`;
+  }).join('');
+  toEl.innerHTML = Array.from({length: dim}, (_,i) => {
+    const d = i + 1;
+    return `<option value="${d}"${d===Math.min(Math.max(curTo,1),dim)?' selected':''}>${d}</option>`;
+  }).join('');
+  // sensible default for custom: mid-month example 11–20 if available
+  if(_sbRangeMode === 'custom' && !fromEl.dataset.inited){
+    fromEl.value = String(Math.min(11, dim));
+    toEl.value = String(Math.min(20, dim));
+    fromEl.dataset.inited = '1';
+  }
 }
 
 const WOFF_DOW = {SUN:0,MON:1,TUE:2,WED:3,THU:4,FRI:5,SAT:6};
@@ -11978,7 +12388,19 @@ async function loadScheduleBuilder(){
   if(!monthKey){toast('⚠️ महीना चुनें');return;}
   const [yr, mo] = monthKey.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
-  const dayNums = Array.from({length: daysInMonth}, (_,i)=>i+1);
+  // Custom date range support (e.g. 11–20 Oct)
+  let dayFrom = 1, dayTo = daysInMonth;
+  if(typeof _sbRangeMode !== 'undefined' && _sbRangeMode === 'custom'){
+    const fEl = document.getElementById('sb_dayFrom');
+    const tEl = document.getElementById('sb_dayTo');
+    dayFrom = Math.max(1, Math.min(daysInMonth, parseInt(fEl && fEl.value, 10) || 1));
+    dayTo   = Math.max(1, Math.min(daysInMonth, parseInt(tEl && tEl.value, 10) || daysInMonth));
+    if(dayFrom > dayTo){ const tmp=dayFrom; dayFrom=dayTo; dayTo=tmp; }
+  }
+  window._sbDayFrom = dayFrom;
+  window._sbDayTo = dayTo;
+  window._sbDaysInMonth = daysInMonth;
+  const dayNums = Array.from({length: dayTo - dayFrom + 1}, (_,i)=> dayFrom + i);
 
   // Load existing saved schedule if any — guard against null/undefined
   const allScheds = getSchedules() || {};
@@ -12052,14 +12474,15 @@ async function loadScheduleBuilder(){
     }catch(leaveErr){ console.warn('Leave parse error for', emp.id, leaveErr); }
     
     const cells = dayNums.map((d,i) => {
+      const dayIdx = d - 1; // always 0-based index in full month array
       const dateStr = `${yr}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const isLeaveDate = empLeaves.has(dateStr);
-      let val = empSaved[i] || (function(){
+      let val = empSaved[dayIdx] || (function(){
         const mk2 = monthKey.replace('-','_');
         if(typeof EXCEL_SCHEDULES !== 'undefined' && EXCEL_SCHEDULES[mk2] && EXCEL_SCHEDULES[mk2][emp.id]){
-          return EXCEL_SCHEDULES[mk2][emp.id][i] || '';
+          return EXCEL_SCHEDULES[mk2][emp.id][dayIdx] || '';
         }
-        if(yr===2026 && mo===3 && emp.ms) return emp.ms[d-1]||'';
+        if(yr===2026 && mo===3 && emp.ms) return emp.ms[dayIdx]||'';
         return '';
       })();
       // If approved leave exists and cell is empty or not already L, mark as L
@@ -12067,10 +12490,10 @@ async function loadScheduleBuilder(){
       const cls = val ? cellClass(val) : '';
       const isWoffDay = empWoffDow !== -1 && new Date(yr, mo-1, d).getDay() === empWoffDow;
       const leaveStyle = isLeaveDate ? 'outline:2px solid #f43f5e;border-radius:4px;box-shadow:0 0 4px rgba(244,63,94,.5);' : '';
-      const leaveClick = isLeaveDate ? ` onclick="_confirmLeaveOverride(this,'${emp.id}',${i},'${dateStr}')"` : '';
+      const leaveClick = isLeaveDate ? ` onclick="_confirmLeaveOverride(this,'${emp.id}',${dayIdx},'${dateStr}')"` : '';
       return `<td style="padding:2px;${isWoffDay?'background:rgba(249,115,22,0.06);':''}" title="${isLeaveDate?'🛡️ Approved Leave':isWoffDay?emp.woff+' (Weekly Off)':''}">
         <div class="shc ${cls}" style="width:28px;height:24px;font-size:10px;cursor:pointer;min-width:unset;touch-action:none;user-select:none;${leaveStyle}${isWoffDay&&!val&&!isLeaveDate?'border:1px dashed rgba(249,115,22,0.3);':''}"${leaveClick}
-          data-empid="${emp.id}" data-day="${i}" data-row="${rowIdx}" data-val="${val}" data-isleave="${isLeaveDate?'1':'0'}">
+          data-empid="${emp.id}" data-day="${dayIdx}" data-row="${rowIdx}" data-val="${val}" data-isleave="${isLeaveDate?'1':'0'}">
           ${val ? cellDisp(val) : '—'}
         </div>
       </td>`;
@@ -12087,11 +12510,14 @@ async function loadScheduleBuilder(){
   }).join('');
 
   const monthLabel = new Date(yr, mo-1, 1).toLocaleDateString(_lang==='en'?'en-IN':'hi-IN',{month:'long',year:'numeric'});
+  const rangeLabel = (dayFrom === 1 && dayTo === daysInMonth)
+    ? monthLabel
+    : `${dayFrom}–${dayTo} ${monthLabel}`;
 
   openModal(`<div class="modal-handle"></div>
     <div id="sbStickyHeader" style="position:sticky;top:0;z-index:10;background:var(--bg);padding-bottom:6px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div class="modal-title" style="margin:0">📅 ${monthLabel}</div>
+        <div class="modal-title" style="margin:0">📅 ${rangeLabel}</div>
         <button onclick="openScheduleBuilder()" style="background:none;border:1px solid var(--border2);border-radius:8px;color:var(--muted);padding:5px 10px;cursor:pointer;font-size:12px">← बदलें</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -12117,7 +12543,7 @@ async function loadScheduleBuilder(){
         <tbody id="sb_tbody">${rows}</tbody>
       </table>
     </div>
-    <div style="display:flex;gap:8px">
+    <div id="sbSaveBar">
       <button class="submit-btn" style="flex:1" onclick="saveScheduleBuilder('${monthKey}')">💾 Save करें</button>
       <button class="cancel-btn" style="flex:1" onclick="closeModal()">रद्द करें</button>
     </div>`);
@@ -12153,12 +12579,20 @@ function _sbSetCellValue(cell, val){
   const selected=cell.classList.contains('sb-selected');
   cell.className='shc '+(val?cellClass(val):'')+(selected?' sb-selected':'');
   cell.textContent=val?cellDisp(val):'—';
-  if(!_sbData[empId]){
+  const dim = window._sbDaysInMonth || 31;
+  if(!_sbData[empId] || _sbData[empId].length < dim){
+    const base = Array.isArray(_sbData[empId]) ? _sbData[empId].slice() : new Array(dim).fill('');
+    while(base.length < dim) base.push('');
+    // Seed from visible cells (data-day is full-month index)
     const sbTbody=document.getElementById('sb_tbody');
-    const allCells=sbTbody?sbTbody.querySelectorAll(`[data-empid="${empId}"]`):document.querySelectorAll(`[data-empid="${empId}"]`);
-    _sbData[empId]=Array.from(allCells).map(c=>c.dataset.val||'');
+    const allCells=sbTbody?sbTbody.querySelectorAll(`[data-empid="${empId}"]`):[];
+    allCells.forEach(c=>{
+      const di=+c.dataset.day;
+      if(!isNaN(di) && di>=0 && di<dim) base[di]=c.dataset.val||'';
+    });
+    _sbData[empId]=base;
   }
-  _sbData[empId][dayIdx]=val;
+  if(dayIdx>=0 && dayIdx < _sbData[empId].length) _sbData[empId][dayIdx]=val;
 }
 
 function _sbPositionStickyTableHeader(){
@@ -12625,31 +13059,42 @@ function _forceOverrideLeaveCell(empId, dayIdx){
 
 async function saveScheduleBuilder(monthKey){
   const [yr, mo] = monthKey.split('-').map(Number);
-  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const daysInMonth = (window._sbDaysInMonth) || new Date(yr, mo, 0).getDate();
   
   // FIX: scope to modal tbody only — background schedule grid also has
   // cells with [data-empid] which would corrupt saved data
   const sbTbody = document.getElementById('sb_tbody');
   if(!sbTbody){ toast('⚠️ Schedule Builder open नहीं है'); return; }
 
-  // Collect ALL cells from table
-  const emps = getEmps().filter(e => e.status !== 'resigned');
-  const schedData = {};
-  
-  emps.forEach(emp => {
-    const cells = sbTbody.querySelectorAll(`[data-empid="${emp.id}"]`);
-    if(cells.length > 0){
-      schedData[emp.id] = Array.from(cells).map(c => c.dataset.val || 'O');
-    }
-  });
-  
-  // Merge with existing saved data (for sections not loaded)
+  // Merge with existing saved data (for sections / days not loaded)
   const existing = (getSchedules() || {})[monthKey.replace('-','_')] || {};
-  const merged = {...existing, ...schedData};
+  const merged = {...existing};
+  const emps = getEmps().filter(e => e.status !== 'resigned');
+
+  emps.forEach(emp => {
+    const cells = Array.from(sbTbody.querySelectorAll(`[data-empid="${emp.id}"]`));
+    if(!cells.length) return;
+    // Start from existing full-month array (or blank)
+    const arr = Array.isArray(merged[emp.id])
+      ? merged[emp.id].slice()
+      : new Array(daysInMonth).fill('');
+    // Ensure length covers full month
+    while(arr.length < daysInMonth) arr.push('');
+    cells.forEach(c => {
+      const dayIdx = parseInt(c.dataset.day, 10);
+      if(!isNaN(dayIdx) && dayIdx >= 0 && dayIdx < daysInMonth){
+        arr[dayIdx] = c.dataset.val || 'O';
+      }
+    });
+    merged[emp.id] = arr;
+  });
   
   try{
     await fbSet('schedules/' + monthKey.replace('-','_'), merged);
-    toast('✅ Schedule save हो गई!');
+    const from = window._sbDayFrom || 1;
+    const to = window._sbDayTo || daysInMonth;
+    const rangeMsg = (from === 1 && to === daysInMonth) ? '' : ` (${from}–${to})`;
+    toast('✅ Schedule save हो गई!' + rangeMsg);
     closeModal();
     renderSchedule();
   } catch(e){
@@ -17486,23 +17931,13 @@ function initPWA(){
   }
 
   // Show install button if NOT already running as installed PWA
-  const isInstalled = window.matchMedia('(display-mode: standalone)').matches
-                   || window.navigator.standalone === true;
-  if(!isInstalled){
-    // Show 📲 button in header always (user can tap anytime)
-    setTimeout(()=>{
-      const btn = document.getElementById('pwaInstallBtn');
-      if(btn) btn.style.display = 'flex';
-      // Also show on login screen
-      const loginBtn = document.getElementById('loginPwaBtn');
-      if(loginBtn) loginBtn.style.display = 'flex';
-    }, 800);
-  }
+  _mpRefreshInstallButtons();
 
-  // Capture install prompt (Android Chrome)
+  // Capture install prompt as early as possible (Android Chrome / Edge)
   window.addEventListener('beforeinstallprompt', e=>{
     e.preventDefault();
     _pwaPrompt = e;
+    _mpRefreshInstallButtons();
     showInstallBanner();
   });
 
@@ -17511,15 +17946,26 @@ function initPWA(){
     hideInstallBanner();
     toast('🎉 App install हो गई! Home screen पर देखें');
     _pwaPrompt = null;
-    const btn = document.getElementById('pwaInstallBtn');
-    if(btn) btn.style.display = 'none';
+    _mpRefreshInstallButtons();
   });
 }
 
-function showInstallBanner(){
-  // Show the header install button only (no floating banner)
+function _mpIsPwaInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true
+      || document.referrer.includes('android-app://');
+}
+
+function _mpRefreshInstallButtons(){
+  const installed = _mpIsPwaInstalled();
   const btn = document.getElementById('pwaInstallBtn');
-  if(btn) btn.style.display = 'flex';
+  const loginBtn = document.getElementById('loginPwaBtn');
+  if(btn) btn.style.display = installed ? 'none' : 'flex';
+  if(loginBtn) loginBtn.style.display = installed ? 'none' : 'flex';
+}
+
+function showInstallBanner(){
+  _mpRefreshInstallButtons();
 }
 
 function hideInstallBanner(){
@@ -17527,28 +17973,57 @@ function hideInstallBanner(){
   if(b) b.style.display = 'none';
 }
 
+/**
+ * Tap Install → native install dialog when browser allows it.
+ * If prompt not ready yet, wait briefly for beforeinstallprompt then retry.
+ */
 async function triggerPWAInstall(){
+  if(window._pwaPrompt && !_pwaPrompt) _pwaPrompt = window._pwaPrompt;
+  if(_mpIsPwaInstalled()){
+    toast('✅ App पहले से installed है!');
+    _mpRefreshInstallButtons();
+    return;
+  }
+
+  // Wait up to ~2s for browser to fire beforeinstallprompt (first visit)
+  if(!_pwaPrompt){
+    toast('⏳ Install तैयार हो रहा है...');
+    await new Promise(r => {
+      let done = false;
+      const finish = () => { if(!done){ done = true; r(); } };
+      const t = setTimeout(finish, 2000);
+      const once = (e) => {
+        e.preventDefault();
+        _pwaPrompt = e;
+        clearTimeout(t);
+        finish();
+      };
+      window.addEventListener('beforeinstallprompt', once, { once: true });
+    });
+  }
+
   if(_pwaPrompt){
-    // Android Chrome — native install prompt
     try{
       _pwaPrompt.prompt();
       const result = await _pwaPrompt.userChoice;
       if(result.outcome === 'accepted'){
         toast('✅ App install हो रही है...');
-        const btn = document.getElementById('pwaInstallBtn');
-        if(btn) btn.style.display = 'none';
-        const lBtn = document.getElementById('loginPwaBtn');
-        if(lBtn) lBtn.style.display = 'none';
+        _pwaPrompt = null;
+        _mpRefreshInstallButtons();
+        hideInstallBanner();
+      } else {
+        toast('Install रद्द किया');
+        // Keep prompt discarded after userChoice — browser won't reuse it
+        _pwaPrompt = null;
       }
-      _pwaPrompt = null;
-      hideInstallBanner();
+      return;
     }catch(err){
-      // prompt() failed — fall through to manual instructions
+      console.warn('[PWA] prompt failed', err);
       _pwaPrompt = null;
-      _showInstallInstructions();
     }
-    return;
   }
+
+  // Fallback: manual steps (iOS / browsers without beforeinstallprompt)
   _showInstallInstructions();
 }
 

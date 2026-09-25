@@ -2067,3 +2067,64 @@ body.light .team-btn-import {
 body.light .team-btn-delete {
   background: linear-gradient(135deg,#e11d48,#be123c) !important;
 }
+
+/* ══ FIX: Hide Firebase reCAPTCHA badge (looks odd on mobile) ══ */
+.grecaptcha-badge {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ══ FIX: Modal bottom safe-area — prevent Save / action buttons cropped on mobile ══ */
+.overlay.open .modal {
+  padding-bottom: max(56px, calc(28px + env(safe-area-inset-bottom, 0px))) !important;
+  max-height: min(96vh, calc(100dvh - env(safe-area-inset-bottom, 0px))) !important;
+  box-sizing: border-box;
+}
+
+/* Schedule Builder: sticky Save bar so it never scrolls under the gesture bar */
+#sbSaveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: linear-gradient(to top, var(--bg2) 70%, transparent);
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom, 8px));
+  margin: 0 -4px;
+  display: flex;
+  gap: 8px;
+}
+
+/* Ensure schedule-builder body can scroll above the sticky save bar */
+#sbBodyScroll {
+  max-height: min(52vh, calc(100dvh - 280px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent action buttons from being clipped by overflow */
+.sched-admin-row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sched-admin-btn {
+  min-height: 40px;
+  flex: 1 1 auto;
+}
+
+/* Keep invisible reCAPTCHA host off-screen / non-intrusive */
+#recaptcha-container,
+#recaptcha-container-device,
+#recaptcha-container-delall {
+  position: fixed !important;
+  left: -9999px !important;
+  bottom: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
+}
