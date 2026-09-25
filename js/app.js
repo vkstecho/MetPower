@@ -701,13 +701,24 @@ async function fbRemove(path){
   updateSyncTime();
 }
 
+const _fbListenUnsubs = {};
 function fbListen(path, cb){
-  window._fbAccess('onValue', path, snap => {
+  // Prevent duplicate onValue subscriptions on the same path
+  if(_fbListenUnsubs[path]){
+    try{ _fbListenUnsubs[path](); }catch(e){}
+    delete _fbListenUnsubs[path];
+  }
+  const p = window._fbAccess('onValue', path, snap => {
     const val = snap.exists() ? snap.val() : null;
-    cb(val);
+    try{ cb(val); }catch(e){ console.warn('[fbListen]', path, e); }
     const st = document.getElementById('syncTime');
     if(st) st.textContent = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   });
+  // onValue returns unsubscribe in modular SDK when used correctly
+  if(typeof p === 'function') _fbListenUnsubs[path] = p;
+  else if(p && typeof p.then === 'function'){
+    p.then(unsub=>{ if(typeof unsub === 'function') _fbListenUnsubs[path] = unsub; }).catch(()=>{});
+  }
 }
 
 // ════════════════════════════════════════
@@ -716,86 +727,139 @@ function fbListen(path, cb){
 const APP_VERSION = '2.2'; // Bump this to force re-seed
 
 async function initData(){
-  // Check if employees exist in Firebase
-  const existing = await fbGet('employees');
-  
-  if(!existing){
-    // First time ONLY — seed employees
-    const empObj = {};
-    DEFAULT_EMP.forEach(e => empObj[e.id] = e);
-    await fbSet('employees', empObj);
-    await fbSet('instructions', DEFAULT_INSTRUCTIONS);
-    toast('✅ डेटा initialize हो गया');
-    // NOTE: leaves, overrides, reports — never reset, preserve always
-  }
-  // Always update app version silently — no data wipe
-  await fbSet('appVersion', APP_VERSION);
+  // ══ PERFORMANCE: staged RTDB load (this app uses Realtime Database, not Firestore) ══
+  // 1) Parallel one-shot get for critical paths → fast first paint
+  // 2) Then attach live listeners (deduped)
+  // 3) Secondary paths load after UI is interactive
 
-  // Set up live listeners - employees listener triggers full re-render
-  fbListen('employees', v => { 
+  if(window._mpListenersStarted) {
+    console.log('[initData] listeners already active');
+    return;
+  }
+
+  const mergeEmps = (v) => {
     const fbEmps = v ? Object.values(v) : [];
-    // Merge DEFAULT_EMP phone numbers into Firebase records (Firebase record wins if it has a phone)
-    _cache.employees = fbEmps.map(e => {
+    return fbEmps.map(e => {
       if(!e.phone){
         const def = DEFAULT_EMP.find(d=>d.id===e.id);
         if(def && def.phone) return {...e, phone: def.phone};
       }
       return e;
     });
-    refreshAll(); 
-  });
-  fbListen('leaves', v => { 
-    _cache.leaves = v ? Object.values(v) : []; 
-    refreshAll(); 
-  });
-  fbListen('reports', v => { 
-    // Preserve Firebase key as _key fallback — critical for delete button to work
-    _cache.reports = v ? Object.entries(v).map(([k,r])=>({...r, _key: r._key||k})) : []; 
-    refreshAll(); 
-  });
-  fbListen('overrides', v => { 
-    _cache.overrides = v || {}; 
-    refreshAll(); 
-  });
-  let _prevRegCount = 0;
-  fbListen('regRequests', v => {
-    const list = v ? Object.values(v) : [];
-    _cache.regRequests = list;
-    // Notify admin of new pending registrations
-    const pendingNow = list.filter(r=>r.status==='pending').length;
-    if(isAdmin() && pendingNow > _prevRegCount && _prevRegCount >= 0){
-      const newest = list.filter(r=>r.status==='pending').slice(-1)[0];
-      if(newest && typeof Notification !== 'undefined' && Notification.permission==='granted'){
-        new Notification('🆕 नया Login Request!',{
-          body: (newest.name||newest.empId)+' ने registration भेजा',
-          icon:'/MP-App/icons/icon-192.png', tag:'mp-reg-notif'
-        });
-      }
-      // Flash bell
-      const bell = document.getElementById('notifBtn');
-      if(bell){ bell.style.display='flex'; }
-    }
-    _prevRegCount = pendingNow;
-    refreshAll();
-  });
-  // Load settings (includes anthropicKey for AI chatbox)
-  fbListen('settings', v => {
-    _cache.settings = v || {};
-    // Sync custom employee order from Firebase settings
-    _customEmpOrder = (v && v.empDisplayOrder) ? v.empDisplayOrder : {};
-    // Sync custom role overrides
-    _customEmpRoles = (v && v.empRoleOverrides) ? v.empRoleOverrides : {};
-  });
+  };
 
-  fbListen('instructions', v => { 
-    _cache.instructions = v || DEFAULT_INSTRUCTIONS; 
+  // ── Phase A: parallel bootstrap reads (employees + schedules first) ──
+  const t0 = performance.now();
+  try{
+    const [existing, schedulesSnap, leavesSnap, overridesSnap] = await Promise.all([
+      fbGet('employees').catch(()=>null),
+      fbGet('schedules').catch(()=>null),
+      fbGet('leaves').catch(()=>null),
+      fbGet('overrides').catch(()=>null),
+    ]);
+
+    if(!existing){
+      try{
+        const empObj = {};
+        DEFAULT_EMP.forEach(e => empObj[e.id] = e);
+        await fbSet('employees', empObj);
+        await fbSet('instructions', DEFAULT_INSTRUCTIONS);
+        _cache.employees = mergeEmps(empObj);
+        toast('✅ Data initialized');
+      }catch(seedErr){
+        console.warn('[initData] seed skipped', seedErr);
+        _cache.employees = _cache.employees || [];
+      }
+    } else {
+      _cache.employees = mergeEmps(existing);
+    }
+    if(window._empLoadWatch){ clearTimeout(window._empLoadWatch); window._empLoadWatch=null; }
+
+    _cache.schedules = schedulesSnap || {};
+    _cache.leaves = leavesSnap ? Object.values(leavesSnap) : [];
+    _cache.overrides = overridesSnap || {};
+    // Non-blocking UI update with what we have
+    try{ refreshAll(); }catch(e){}
+
+    console.log('[initData] bootstrap ms:', Math.round(performance.now()-t0),
+      'emps:', (_cache.employees||[]).length,
+      'sched months:', Object.keys(_cache.schedules||{}).length);
+  }catch(e){
+    console.warn('[initData] bootstrap error', e);
+    if(_cache.employees === null) _cache.employees = [];
+  }
+
+  // Version bump — fire and forget (don't block UI)
+  fbSet('appVersion', APP_VERSION).catch(()=>{});
+
+  // ── Phase B: live listeners (single registration) ──
+  window._mpListenersStarted = true;
+  let _prevRegCount = 0;
+
+  fbListen('employees', v => {
+    if(window._empLoadWatch){ clearTimeout(window._empLoadWatch); window._empLoadWatch=null; }
+    _cache.employees = mergeEmps(v);
+    refreshAll();
   });
   fbListen('schedules', v => {
     _cache.schedules = v || {};
-    refreshAll();
+    // Only refresh schedule/home tabs when schedule data changes
+    _refreshTabs(['home','schedule','myshift']);
   });
-  // Learn content listener
-  initLearnListeners();
+  fbListen('leaves', v => {
+    _cache.leaves = v ? Object.values(v) : [];
+    _refreshTabs(['home','leave','pending']);
+  });
+  fbListen('overrides', v => {
+    _cache.overrides = v || {};
+    _refreshTabs(['home','schedule']);
+  });
+  fbListen('reports', v => {
+    _cache.reports = v ? Object.entries(v).map(([k,r])=>({...r, _key: r._key||k})) : [];
+    _refreshTabs(['reports','pending','home']);
+  });
+  fbListen('settings', v => {
+    _cache.settings = v || {};
+    _customEmpOrder = (v && v.empDisplayOrder) ? v.empDisplayOrder : {};
+    _customEmpRoles = (v && v.empRoleOverrides) ? v.empRoleOverrides : {};
+  });
+  fbListen('instructions', v => {
+    _cache.instructions = v || DEFAULT_INSTRUCTIONS;
+  });
+
+  // Admin-only / less critical — defer slightly so first paint stays fast
+  setTimeout(()=>{
+    fbListen('regRequests', v => {
+      const list = v ? Object.values(v) : [];
+      _cache.regRequests = list;
+      const pendingNow = list.filter(r=>r.status==='pending').length;
+      if(isAdmin() && pendingNow > _prevRegCount && _prevRegCount >= 0){
+        const newest = list.filter(r=>r.status==='pending').slice(-1)[0];
+        if(newest && typeof Notification !== 'undefined' && Notification.permission==='granted'){
+          try{
+            new Notification('🆕 New Login Request!',{
+              body: (newest.name||newest.empId)+' registered',
+              icon:'/MP-App/icons/icon-192.png', tag:'mp-reg-notif'
+            });
+          }catch(e){}
+        }
+        const bell = document.getElementById('notifBtn');
+        if(bell){ bell.style.display='flex'; }
+      }
+      _prevRegCount = pendingNow;
+      _refreshTabs(['pending']);
+    });
+    try{ initLearnListeners(); }catch(e){}
+  }, 400);
+}
+
+/** Refresh only if current tab is affected (avoids full app redraw) */
+function _refreshTabs(tabs){
+  try{ updatePendingBadge(); }catch(e){}
+  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'home';
+  if(!tabs || tabs.includes(cur) || tabs.includes('*')){
+    refreshAll();
+  }
 }
 
 function _normCompanyId(s){ return (s||'').toString().trim().toLowerCase() || 'gls'; }
@@ -4062,15 +4126,21 @@ function confirmModal(title, message, yesLabel='✅ हाँ', noLabel='रद�
 // ── Debounced refreshAll: prevents 5 Firebase listeners firing 5 rerenders ──
 // Only renders once after all listeners settle (300ms window)
 let _refreshTimer = null;
+let _refreshAllTimer = null;
 function refreshAll(){
-  const mc = document.getElementById('mainContent');
-  if(!mc || mc.style.display==='none') return;
-  if(_refreshTimer) clearTimeout(_refreshTimer);
-  _refreshTimer = setTimeout(()=>{
-    _refreshTimer = null;
-    renderAll();
-  }, 300);
+  // Single debounce — coalesces burst of RTDB listener events
+  if(_refreshAllTimer) clearTimeout(_refreshAllTimer);
+  _refreshAllTimer = setTimeout(()=>{
+    _refreshAllTimer = null;
+    try{
+      const mc = document.getElementById('mainContent');
+      if(!mc || mc.style.display==='none') return;
+      renderAll();
+    }catch(e){ console.warn('refreshAll', e); }
+  }, 150);
 }
+function _refreshAllImpl(){ refreshAll(); }
+
 
 function updatePendingBadge(){
   // Update pending tab badge (admin and manager)
@@ -4213,6 +4283,16 @@ async function renderHome(){
       <div class="stat-card"><div class="stat-val" style="color:var(--muted)">...</div><div class="stat-lbl" id="leaveStatLbl">${_lang==='en'?'On Leave':'छुट्टी पर'}</div></div>`;
     if(stillLoading){
       document.getElementById('homeSections').innerHTML='<div style="text-align:center;padding:20px;color:var(--muted2)">🔄 '+(_lang==='en'?'Loading data from Firebase...':'Firebase से डेटा लोड हो रहा है...')+'</div>';
+      // If employees still null after 8s, treat as empty (permission/network) so UI unblocks
+      if(!window._empLoadWatch){
+        window._empLoadWatch = setTimeout(()=>{
+          if(_cache.employees === null){
+            _cache.employees = [];
+            console.warn('[home] employees load timeout — showing empty');
+            try{ renderHome(); }catch(e){}
+          }
+        }, 8000);
+      }
     } else if(isAdminOrMgr()){
       document.getElementById('homeSections').innerHTML=`<div style="text-align:center;padding:30px 16px;color:var(--muted2)">
         <div style="font-size:36px;margin-bottom:10px">👥</div>
@@ -9988,6 +10068,50 @@ async function _confirmDeleteAllWithOtp(){
 }
 
 
+
+/** Normalize Excel header cell for matching */
+function _normHeaderCell(h){
+  return String(h||'').toLowerCase().trim()
+    .replace(/[₹$]/g,'')
+    .replace(/\(.*?\)/g,'')
+    .replace(/[_\.\/\-]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+/**
+ * Map spreadsheet headers → column indexes.
+ * Supports: Emp ID, Employee Code, Mobile, Machine, Salary (₹/month), etc.
+ */
+function _mapExcelColumns(headerRow){
+  const header = (headerRow||[]).map(_normHeaderCell);
+  const aliases = {
+    name:        ['name','naam','employee name','emp name','full name','worker name'],
+    code:        ['emp id','empid','emp code','employee code','employee id','e code','ecode','code','id','emp no','emp number','employee no'],
+    mobile:      ['mobile','mobile no','mobile number','phone','phone no','phone number','contact','contact no','मोबाइल'],
+    designation: ['designation','desig','role','position','post','पद'],
+    machine:     ['machine','mc','machine name','section machine','मशीन'],
+    responsibility: ['responsibility','responsibilities','duty','job'],
+    doj:         ['joining date','joining','date of joining','doj','join date'],
+    dob:         ['date of birth','dob','birth date','d.o.b','birthdate'],
+    woff:        ['weekly off','weekly off day','woff','week off','off day','w off'],
+    salary:      ['salary','monthly salary','basic salary','ctc','gross','net pay','wage','pay','वेतन','sal'],
+  };
+  const colMap = {};
+  Object.entries(aliases).forEach(([key, list])=>{
+    let idx = -1;
+    for(const a of list){
+      idx = header.findIndex(h => h === a || h.includes(a));
+      if(idx >= 0) break;
+    }
+    // Prefer exact-ish for code: avoid matching pure "id" in other headers late
+    if(key === 'code' && idx < 0){
+      idx = header.findIndex(h => /^(emp\s*)?(id|code|no)$/.test(h) || h.startsWith('emp '));
+    }
+    colMap[key] = idx;
+  });
+  return { header, colMap };
+}
+
 // ════════════════════════════════════════
 // TEAM — EXCEL UPLOAD (Bulk Update)
 // ════════════════════════════════════════
@@ -10006,7 +10130,7 @@ async function handleTeamExcelFile(file){
   if(!file) return;
   const preview=document.getElementById('teamExcelPreview');
   preview.style.display='block';
-  preview.innerHTML='<div style="text-align:center;padding:16px;color:var(--muted2)">⏳ फ़ाइल पढ़ रहे हैं...</div>';
+  preview.innerHTML='<div style="text-align:center;padding:16px;color:var(--muted2)">⏳ Reading file…</div>';
 
   try{
     if(!window.XLSX){
@@ -10021,34 +10145,42 @@ async function handleTeamExcelFile(file){
     const buf=await file.arrayBuffer();
     const wb=XLSX.read(buf,{type:'array',cellDates:true});
     const ws=wb.Sheets[wb.SheetNames[0]];
-    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
 
     if(rows.length<2){
-      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ Excel में कोई data नहीं मिला</div>';
+      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ No data rows found in Excel</div>';
       return;
     }
 
-    const header=rows[0].map(h=>(h||'').toString().trim().toLowerCase());
-    
-    const colMap={
-      code: header.findIndex(h=>h.includes('employee')&&h.includes('code') || h==='empid' || h==='emp code' || h==='code' || h==='employee code'),
-      name: header.findIndex(h=>h==='name' || h==='नाम' || h.includes('employee name')),
-      mobile: header.findIndex(h=>h.includes('mobile') || h.includes('phone') || h.includes('मोबाइल') || h==='contact' || h==='number'),
-      designation: header.findIndex(h=>h.includes('designation') || h.includes('desig') || h.includes('पद')),
-      machine: header.findIndex(h=>h.includes('machine') || h.includes('mc') || h.includes('मशीन')),
-      doj: header.findIndex(h=>h.includes('joining') || h.includes('doj') || h.includes('date of')),
-      woff: header.findIndex(h=>h.includes('weekly') || h.includes('woff') || h.includes('w-off') || h.includes('छुट्टी') || (h.includes('off') && !h.includes('date'))),
-      salary: header.findIndex(h=>h.includes('salary') || h.includes('sal') || h.includes('ctc') || h.includes('basic pay') || h.includes('wage') || h.includes('pay') || h.includes('वेतन') || h.includes('gross') || h.includes('net pay') || h.includes('monthly salary')),
-    };
+    const { header, colMap } = _mapExcelColumns(rows[0]);
+    // Map legacy names used below
+    colMap.name = colMap.name;
+    colMap.mobile = colMap.mobile;
+    colMap.designation = colMap.designation;
+    colMap.machine = colMap.machine;
+    colMap.doj = colMap.doj;
+    colMap.woff = colMap.woff;
+    colMap.salary = colMap.salary;
 
-    if(colMap.code===-1){
-      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ "Employee Code" column नहीं मिला। Header names check करें।<br><span style="font-size:11px;color:var(--muted2)">Found headers: '+rows[0].join(', ')+'</span></div>';
+    if(colMap.code < 0 && colMap.name < 0){
+      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ Need <b>Name</b> and/or <b>Emp ID</b> columns.<br><span style="font-size:11px;color:var(--muted2)">Found: '+rows[0].join(', ')+'</span></div>';
+      return;
+    }
+    if(colMap.code < 0){
+      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ <b>Emp ID</b> / Employee Code column not found.<br><span style="font-size:11px;color:var(--muted2)">Found headers: '+rows[0].join(', ')+'</span><br><span style="font-size:11px">Accepted: Emp ID, EmpID, Employee Code, Code…</span></div>';
       return;
     }
 
     const emps=getEmps();
+    const allEmps = _cache.employees || [];
+    const phoneOwners = new Map();
+    allEmps.forEach(e=>{
+      const p=_normMobileKey(e.phone||e.mobile||'');
+      if(p) phoneOwners.set(p, e);
+    });
+
     const parsed=[];
-    let matchCount=0, skipCount=0;
+    let matchCount=0, createCount=0, skipCount=0;
 
     for(let i=1;i<rows.length;i++){
       const r=rows[i];
@@ -10056,78 +10188,167 @@ async function handleTeamExcelFile(file){
       const code=(r[colMap.code]||'').toString().trim().toUpperCase();
       if(!code) continue;
 
-      const matched=emps.find(e=>(e.empId||'').trim().toUpperCase()===code);
-      const name=colMap.name>=0?(r[colMap.name]||'').toString().trim():'';
+      let matched=emps.find(e=>(e.empId||'').trim().toUpperCase()===code)
+        || allEmps.find(e=>(e.empId||'').trim().toUpperCase()===code);
+      const name=colMap.name>=0?(r[colMap.name]||'').toString().trim():(matched?matched.name:'');
+      if(!name && !matched){ skipCount++; continue; }
+
       const mobile=colMap.mobile>=0?(r[colMap.mobile]||'').toString().trim().replace(/\D/g,'').slice(-10):'';
       const designation=colMap.designation>=0?(r[colMap.designation]||'').toString().trim():'';
       const machine=colMap.machine>=0?(r[colMap.machine]||'').toString().trim():'';
+      const responsibility=colMap.responsibility>=0?(r[colMap.responsibility]||'').toString().trim():'';
       const doj=colMap.doj>=0?_parseExcelDate(r[colMap.doj]):'';
+      const dob=colMap.dob>=0?_parseExcelDate(r[colMap.dob]):'';
       const woff=colMap.woff>=0?_parseWoff((r[colMap.woff]||'').toString().trim()):'';
       const salaryRaw=colMap.salary>=0?(r[colMap.salary]||'').toString().trim().replace(/[^0-9.]/g,''):'';
       const salary=salaryRaw?parseFloat(salaryRaw):null;
 
-      if(matched) matchCount++; else skipCount++;
+      // Derive section from machine label
+      let sec = matched ? matched.sec : '';
+      if(machine){
+        const mk = machine.toUpperCase().replace(/\s+/g,'');
+        if(/^M-?1$/i.test(machine) || mk==='M1') sec='M-1';
+        else if(/^M-?2$/i.test(machine) || mk==='M2') sec='M-2';
+        else if(/^S-?1$/i.test(machine) || mk==='S1') sec='S-1';
+        else if(/^S-?2$/i.test(machine) || mk==='S2') sec='S-2';
+        else if(/METALLISER|METALIZER|MET/i.test(machine) && !/^M-?\d/i.test(machine)) sec='MET';
+        else if(/SLITTER|SLIT/i.test(machine) && !/^S-?\d/i.test(machine)) sec='SLIT';
+        else if(/SUP|SUPERVISOR|ENGINEER/i.test(machine)) sec='SUP';
+        else sec = machine;
+      }
+
+      let otherTeam = false, conflictWith = '';
+      if(mobile && mobile.length===10){
+        const owner = phoneOwners.get(mobile);
+        if(owner && (!matched || owner.id !== matched.id)){
+          const myKey = SESSION.role==='manager' ? _normMobileKey(SESSION.mobile) : null;
+          if(owner.managerId && myKey && owner.managerId !== myKey){
+            otherTeam = true; conflictWith = owner.name||owner.empId||'other team';
+          } else if(matched && owner.id !== matched.id){
+            otherTeam = true; conflictWith = owner.name||owner.empId||'duplicate';
+          }
+        }
+      }
+
+      if(matched) matchCount++; else createCount++;
 
       parsed.push({
-        code, name, mobile, designation, machine, doj, woff, salary,
-        matched:!!matched,
-        empObjId:matched?matched.id:null,
-        currentName:matched?matched.name:'—'
+        id: matched ? matched.id : ('emp_'+code.replace(/[^A-Z0-9]/g,'_').toLowerCase()),
+        empId: code,
+        name: name || matched.name,
+        phone: mobile || (matched && (matched.phone||matched.mobile)) || '',
+        mobile: mobile || '',
+        designation: designation || (matched&&matched.designation) || '',
+        machine: machine || (matched&&matched.machine) || '',
+        responsibility: responsibility || (matched&&matched.responsibility) || '',
+        sec: sec || (matched&&matched.sec) || 'MET',
+        joiningDate: doj || (matched&&matched.joiningDate) || '',
+        dob: dob || (matched&&matched.dob) || '',
+        woff: woff || (matched&&matched.woff) || '',
+        monthlySalary: (salary!=null && !isNaN(salary)) ? salary : (matched&&matched.monthlySalary) || null,
+        existing: !!matched,
+        otherTeam,
+        _conflictWith: conflictWith,
+        _skipSave: otherTeam
       });
     }
 
-    let tableHtml=`
-      <div style="margin-bottom:12px">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <span style="background:rgba(34,197,94,.15);color:var(--green);padding:4px 12px;border-radius:8px;font-size:12px;font-weight:800">✅ ${matchCount} Match</span>
-          ${skipCount>0?`<span style="background:rgba(244,63,94,.12);color:var(--lv);padding:4px 12px;border-radius:8px;font-size:12px;font-weight:800">❌ ${skipCount} Not Found</span>`:''}
-        </div>
-        <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-          <table style="width:100%;border-collapse:collapse;font-size:11px">
-            <thead>
-              <tr style="background:var(--card2);position:sticky;top:0">
-                <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-size:10px">Status</th>
-                <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-size:10px">Code</th>
-                <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-size:10px">Name</th>
-                <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-size:10px">Mobile</th>
-                <th style="padding:8px 6px;text-align:left;color:#fbbf24;font-size:10px">Salary</th>
-                <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-size:10px">W-Off</th>
-              </tr>
-            </thead>
-            <tbody>`;
-
-    parsed.forEach(p=>{
-      const bg=p.matched?'rgba(34,197,94,.04)':'rgba(244,63,94,.04)';
-      const icon=p.matched?'✅':'❌';
-      const mobileDisp=p.mobile?(p.mobile.length===10?'<span style="color:var(--green)">'+p.mobile+'</span>':'<span style="color:var(--lv)">'+p.mobile+'</span>'):'<span style="color:var(--muted)">—</span>';
-      const salaryDisp = p.salary ? `<span style="color:#fbbf24;font-weight:700">₹${Number(p.salary).toLocaleString('en-IN')}</span>` : '<span style="color:var(--muted)">—</span>';
-      tableHtml+=`<tr style="background:${bg};border-bottom:1px solid var(--border)">
-        <td style="padding:6px">${icon}</td>
-        <td style="padding:6px;font-weight:700;color:#fff">${escHtml(p.code)}</td>
-        <td style="padding:6px;color:var(--text)">${escHtml(p.name||p.currentName)}</td>
-        <td style="padding:6px">${mobileDisp}</td>
-        <td style="padding:6px">${salaryDisp}</td>
-        <td style="padding:6px;color:var(--muted2)">${p.woff||'—'}</td>
-      </tr>`;
-    });
-
-    tableHtml+=`</tbody></table></div></div>`;
-
-    if(matchCount>0){
-      tableHtml+=`
-        <button class="submit-btn" onclick="confirmTeamExcelUpdate()">
-          ✅ ${matchCount} कर्मचारी Update करें
-        </button>`;
-    } else {
-      tableHtml+=`<div style="color:var(--lv);font-size:13px;padding:8px">कोई match नहीं मिला — Employee Codes check करें</div>`;
+    if(!parsed.length){
+      preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ No valid employee rows (need Emp ID + Name).<br><span style="font-size:11px;color:var(--muted2)">Headers: '+rows[0].join(', ')+'</span></div>';
+      return;
     }
 
-    preview.innerHTML=tableHtml;
-    window._teamExcelParsed=parsed;
-
+    window._teamExcelParsed = parsed;
+    const ok = parsed.filter(p=>!p._skipSave);
+    const blocked = parsed.filter(p=>p._skipSave);
+    preview.innerHTML = `
+      <div style="font-size:13px;font-weight:800;color:#22c55e;margin-bottom:8px">
+        ✅ ${ok.length} ready · 🔄 ${matchCount} update · 🆕 ${createCount} new
+        ${blocked.length?` · <span style="color:#fb7185">🚫 ${blocked.length} blocked</span>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--muted2);margin-bottom:8px">Columns: ${header.filter(Boolean).slice(0,12).join(' · ')}</div>
+      ${blocked.length?`<div style="background:rgba(244,63,94,.1);border-radius:8px;padding:8px;font-size:11px;color:#fda4af;margin-bottom:8px">
+        Duplicate / other-team mobile blocked:<br>
+        ${blocked.slice(0,5).map(e=>`<b>${e.name}</b> (${e.mobile}) → ${e._conflictWith}`).join('<br>')}
+      </div>`:''}
+      <div style="max-height:180px;overflow:auto;font-size:12px;border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:12px">
+        ${parsed.slice(0,15).map(e=>`<div style="${e._skipSave?'opacity:.5;color:#fb7185':''}">${e.existing?'🔄':'🆕'} <b style="color:var(--text)">${e.name}</b> · ${e.empId} · ${e.sec||'—'} · ${e.phone||'no mobile'}</div>`).join('')}
+        ${parsed.length>15?`<div>… +${parsed.length-15} more</div>`:''}
+      </div>
+      <button class="submit-btn" onclick="confirmTeamExcelUpload()">💾 Save to Team (${ok.length})</button>
+    `;
   }catch(err){
-    preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ Error: '+err.message+'</div>';
+    console.error('[teamExcel]', err);
+    preview.innerHTML='<div style="color:var(--lv);padding:12px">❌ Error reading file: '+(err.message||err)+'</div>';
   }
+}
+
+async function confirmTeamExcelUpload(){
+  const parsed = (window._teamExcelParsed||[]).filter(e=>!e._skipSave);
+  if(!parsed.length){ toast('❌ Nothing to save'); return; }
+  const preview=document.getElementById('teamExcelPreview');
+  if(preview) preview.innerHTML='<div style="text-align:center;padding:16px">⏳ Saving…</div>';
+
+  const mgrKey = (SESSION.role==='manager' && SESSION.mobile) ? _normMobileKey(SESSION.mobile) : (SESSION.managerId||'');
+  let saved=0, failed=0;
+  for(const emp of parsed){
+    try{
+      const update = {
+        id: emp.id,
+        empId: emp.empId,
+        name: emp.name,
+        sec: emp.sec || 'MET',
+        machine: emp.machine || emp.sec || '',
+        designation: emp.designation || '',
+        responsibility: emp.responsibility || '',
+        phone: emp.phone || emp.mobile || '',
+        mobile: emp.phone || emp.mobile || '',
+        woff: emp.woff || '',
+        joiningDate: emp.joiningDate || '',
+        dob: emp.dob || '',
+        companyId: SESSION.companyId || _normCompanyId(SESSION.company) || 'gls',
+        companyLabel: SESSION.company || 'GLS',
+        updatedAt: new Date().toISOString(),
+        updatedBy: SESSION.name || 'manager'
+      };
+      if(emp.monthlySalary!=null) update.monthlySalary = emp.monthlySalary;
+      if(mgrKey) update.managerId = mgrKey;
+      if(!emp.existing){
+        update.createdAt = new Date().toISOString();
+        update.createdBy = SESSION.name || 'manager';
+      }
+      await fbUpdate('employees/' + emp.id, update);
+      // Pre-approve mobileUsers for OTP login when mobile present
+      if(update.phone && update.phone.length===10){
+        try{
+          const existing = await fbGet('mobileUsers/'+update.phone);
+          if(!existing){
+            await fbSet('mobileUsers/'+update.phone, {
+              name: update.name,
+              mobile: update.phone,
+              role: 'member',
+              status: 'approved',
+              managerId: mgrKey || '',
+              company: update.companyLabel,
+              companyId: update.companyId,
+              empId: update.empId,
+              approvedAt: new Date().toISOString(),
+              approvedBy: SESSION.name || 'manager'
+            });
+          }
+        }catch(ex){ console.warn('mobileUsers skip', update.phone, ex); }
+      }
+      saved++;
+    }catch(e){
+      failed++;
+      console.error('team excel save', emp.name, e);
+    }
+  }
+  window._teamExcelParsed=null;
+  closeTeamExcelUpload();
+  toast(failed ? `✅ ${saved} saved, ${failed} failed` : `✅ ${saved} team members saved`);
+  try{ renderTeam(); }catch(e){}
+  try{ refreshAll(); }catch(e){}
 }
 
 function _parseExcelDate(val){
