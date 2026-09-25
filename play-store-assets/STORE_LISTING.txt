@@ -1,0 +1,32 @@
+MET POWER — PLAY STORE LISTING TEXT
+====================================
+
+App name (30 chars max):
+MET Power
+
+Short description (80 chars max):
+Shift & manpower manager for metalliser and slitter teams.
+
+Full description (English):
+MET Power helps supervisors and managers run daily shift schedules for metalliser and slitter operations.
+
+Key features:
+• Day / Night / Leave schedule grid with live counts
+• Team roster with Emp ID, machine, weekly off, salary fields
+• Excel upload for team data and shift schedules
+• Gate pass, leave, and holiday tracking
+• WhatsApp-ready notification templates (Leave, Absent, Gate Pass, Holiday)
+• Manager profile: company name, shift settings, holiday list
+• Secure phone OTP login for managers
+
+Built for shop-floor teams who need a fast mobile schedule — not a complex desktop ERP.
+
+Full description (Hindi - optional secondary):
+MET Power metalliser और slitter टीमों के लिए शिफ्ट और manpower प्रबंधन ऐप है।
+शेड्यूल, टीम रोस्टर, Excel अपलोड, गेट पास और छुट्टियाँ — सब मोबाइल पर।
+
+Category: Business  (or Productivity)
+Tags: shift, roster, manpower, factory, schedule
+
+Contact email: (your support email)
+Website: (your HTTPS app URL)

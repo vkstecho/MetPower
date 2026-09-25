@@ -3561,7 +3561,7 @@ function _openQuickPhoneReauth(mobile10){
         <div style="width:36px;height:4px;background:#475569;border-radius:2px;margin:0 auto 14px"></div>
         <div style="font-size:17px;font-weight:900;color:#fff;margin-bottom:6px">🔐 Phone verify (one time)</div>
         <div style="font-size:13px;color:#94a3b8;line-height:1.5;margin-bottom:14px">
-          Schedule save के लिए Firebase Phone OTP चाहिए। <b style="color:#e2e8f0">Logout नहीं</b> करना — सिर्फ OTP verify करें। Session वही रहेगा।
+          इस <b>device/browser</b> पर एक बार Phone OTP चाहिए। <b style="color:#e2e8f0">Logout नहीं</b> · Laptop और Mobile दोनों चल सकते हैं (हर device पर अलग से एक बार OTP)।
         </div>
         <div style="font-size:12px;color:#7dd3fc;margin-bottom:10px">📱 +91 ${mobile10}</div>
         <div id="reauthRecaptcha" style="min-height:1px"></div>
@@ -4390,7 +4390,7 @@ async function showProfile(){
         <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">${SESSION.viewCompanyId&&SESSION.viewCompanyId!=='ALL'?'चुनी गई Company के लिए':'पहले header से Company चुनें'}</div></div>
         <div class="pa-arrow">›</div>
       </button>
-      <button class="profile-action" onclick="closeModal();openHolidayListModal()">
+      <button type="button" class="profile-action" onclick="openHolidayListModal()">
         <div class="pa-icon" style="background:rgba(245,158,11,.12)">📅</div>
         <div><div class="pa-label">Holiday List</div><div class="pa-sub">Date + Reason · Excel / image upload</div></div>
         <div class="pa-arrow">›</div>
@@ -4452,7 +4452,7 @@ async function showProfile(){
       <div style="margin-top:6px"><span style="background:rgba(249,115,22,.15);color:#f97316;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:800">${roleLabel}</span></div>
       ${(SESSION.role==='manager'||SESSION.role==='member')?`<button class="profile-action" style="margin-top:14px" onclick="openEditProfileModal()">
         <div class="pa-icon" style="background:rgba(96,165,250,.12)">✏️</div>
-        <div><div class="pa-label">Profile Edit करें</div><div class="pa-sub">नाम और फोटो बदलें</div></div>
+        <div><div class="pa-label">${(_lang==='en')?'Edit Profile':'Profile Edit करें'}</div><div class="pa-sub">${(_lang==='en')?'Name and photo':'नाम और फोटो बदलें'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
 
@@ -4466,24 +4466,24 @@ async function showProfile(){
           </div>
         </div>
       </div>
-      ${isMgr()?`<button class="profile-action" onclick="openShiftSettings()">
+      ${isMgr()?`<button type="button" class="profile-action" onclick="openShiftSettings()">
         <div class="pa-icon" style="background:rgba(168,85,247,.12)">⚙️</div>
-        <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">Shifts, Metalliser/Slitter setup</div></div>
+        <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">${(_lang==='en')?'Shifts, Metalliser / Slitter setup':'Shifts, Metalliser/Slitter setup'}</div></div>
         <div class="pa-arrow">›</div>
       </button>
-      <button class="profile-action" onclick="openHolidayListModal()">
+      <button type="button" class="profile-action" onclick="openHolidayListModal()">
         <div class="pa-icon" style="background:rgba(245,158,11,.12)">📅</div>
-        <div><div class="pa-label">Holiday List</div><div class="pa-sub">Date + Reason · Excel / snapshot</div></div>
+        <div><div class="pa-label">Holiday List</div><div class="pa-sub">${(_lang==='en')?'Date + Reason · Excel / snapshot':'Date + Reason · Excel / snapshot'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
-      ${SESSION.role==='manager'?`<button class="profile-action" onclick="openChangeCompanyModal()">
+      ${(SESSION.role==='manager'||isMgr())?`<button type="button" class="profile-action" onclick="openChangeCompanyModal()">
         <div class="pa-icon" style="background:rgba(96,165,250,.12)">🏢</div>
-        <div><div class="pa-label">Company Name बदलें</div><div class="pa-sub">वर्तमान: ${SESSION.company||'—'}</div></div>
+        <div><div class="pa-label">${(_lang==='en')?'Change Company Name':'Company Name बदलें'}</div><div class="pa-sub">${(_lang==='en')?'Current: ':'वर्तमान: '}${SESSION.company||'—'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
-      ${isMgr()?`<button class="profile-action" onclick="openLeaveTeamModal()" style="border-color:rgba(244,63,94,.35)">
+      ${isMgr()?`<button type="button" class="profile-action" onclick="openLeaveTeamModal()" style="border-color:rgba(244,63,94,.35)">
         <div class="pa-icon" style="background:rgba(244,63,94,.12)">👋</div>
-        <div><div class="pa-label">Leave team / Transfer Manager</div><div class="pa-sub">किसी सदस्य को नया Manager बनाकर टीम छोड़ें</div></div>
+        <div><div class="pa-label">${(_lang==='en')?'Leave team / Transfer Manager':'Leave team / Transfer Manager'}</div><div class="pa-sub">${(_lang==='en')?'Promote a member and leave the team':'किसी सदस्य को नया Manager बनाकर टीम छोड़ें'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
       <button class="profile-action danger" onclick="doLogout()">
@@ -4535,6 +4535,45 @@ function _rankManagerSuccessors(){
     return { emp: e, phone: ph, score, reasons, eligible: ph.length===10 };
   }).sort((a,b)=> b.score - a.score || (a.emp.name||'').localeCompare(b.emp.name||''));
 }
+
+
+async function openChangeCompanyModal(){ /* profile */
+  if(SESSION.role!=='manager' && !isAdmin()){ toast((_lang==='en')?'❌ Manager only':'❌ Manager only'); return; }
+  const isEn = (_lang==='en');
+  const cur = SESSION.company || '';
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">🏢 ${isEn?'Change Company Name':'Company Name बदलें'}</div>
+    <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.5">
+      ${isEn?'Current:':'वर्तमान:'} <b style="color:var(--text)">${(cur||'—').replace(/</g,'&lt;')}</b>
+    </div>
+    <label style="font-size:11px;color:var(--muted2);font-weight:700">${isEn?'New company name':'नया Company नाम'}</label>
+    <input class="inp-field" id="chgCompanyName" value="${String(cur).replace(/"/g,'&quot;')}" placeholder="${isEn?'e.g. MET Power / ABC Industries':'जैसे: MET Power'}" style="margin:8px 0 14px;width:100%;box-sizing:border-box">
+    <button class="submit-btn" onclick="saveChangeCompanyName()">✅ ${isEn?'Save':'Save करें'}</button>
+    <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
+  setTimeout(()=>document.getElementById('chgCompanyName')?.focus(), 100);
+}
+
+async function saveChangeCompanyName(){
+  const isEn = (_lang==='en');
+  const name = (document.getElementById('chgCompanyName')?.value||'').trim();
+  if(!name || name.length < 2){ toast(isEn?'⚠️ Enter a valid company name':'⚠️ सही Company नाम डालें'); return; }
+  try{
+    const mob = _normMobileKey(SESSION.mobile||'');
+    if(mob){
+      await fbUpdate('mobileUsers/'+mob, { company: name, companyUpdatedAt: new Date().toISOString() });
+    }
+    SESSION.company = name;
+    try{ SESSION.companyId = (typeof _normCompanyId==='function') ? _normCompanyId(name) : name; }catch(e){ SESSION.companyId = name; }
+    try{ saveSession(); }catch(e){}
+    toast(isEn?'✅ Company name updated':'✅ Company नाम update हो गया');
+    closeModal();
+    try{ showProfile(); }catch(e){}
+  }catch(e){
+    toast('❌ '+(e.message||e));
+  }
+}
+
+try{ window.openChangeCompanyModal = openChangeCompanyModal; window.saveChangeCompanyName = saveChangeCompanyName; }catch(e){}
 
 function openLeaveTeamModal(){
   if(!isMgr()){ toast('❌ Only Manager'); return; }
@@ -10552,6 +10591,17 @@ async function saveEmployee(empId){
   if(!isAdmin() && !isMgr()){ toast('❌ Only Admin/Manager can edit'); return; }
   if(!empId){ toast('❌ Missing employee id'); return; }
 
+  // Multi-device: each browser needs Phone Auth once; does NOT log out other devices
+  if(typeof _ensureWriteAuth === 'function'){
+    const ok = await _ensureWriteAuth();
+    if(!ok){
+      toast((_lang==='en')
+        ? '❌ Phone verify on this device (other devices stay logged in)'
+        : '❌ इस device पर Phone verify करें (दूसरा device logout नहीं होगा)');
+      return;
+    }
+  }
+
   const val = (id) => {
     const el = document.getElementById(id);
     return el ? String(el.value||'').trim() : '';
@@ -12748,6 +12798,108 @@ async function saveHolidayList(data){
   await fbSet('holidayLists/'+key, payload);
   return payload;
 }
+
+
+let _holidayDraft = { items: [], snapshotUrl: null };
+
+async function openHolidayListModal(){
+  // profile menu entry
+  if(!isAdmin() && !isMgr()){ toast((_lang==='en')?'❌ Manager only':'❌ Manager only'); return; }
+  try{ closeModal(); }catch(e){}
+  try{
+    const data = await loadHolidayList();
+    _holidayDraft = {
+      items: (data.items||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))),
+      snapshotUrl: data.snapshotUrl||null
+    };
+  }catch(e){
+    _holidayDraft = { items: [], snapshotUrl: null };
+  }
+  _renderHolidayListModal();
+}
+
+function _renderHolidayListModal(){
+  const isEn = (_lang==='en');
+  const items = _holidayDraft.items||[];
+  const rows = items.length ? items.map((it,i)=>{
+    const fmt = (()=>{ try{ return new Date(it.date+'T12:00:00').toLocaleDateString(isEn?'en-IN':'hi-IN',{day:'2-digit',month:'short',year:'numeric'}); }catch(e){ return it.date; }})();
+    return `<tr>
+      <td style="padding:8px 6px;font-weight:800;color:var(--text);white-space:nowrap">${fmt}</td>
+      <td style="padding:8px 6px;color:var(--text);font-size:13px">${(it.reason||'').replace(/</g,'&lt;')}</td>
+      <td style="padding:4px;text-align:right">
+        <button type="button" onclick="_removeHolidayItem(${i})" style="background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.35);color:#f43f5e;border-radius:8px;padding:6px 10px;font-weight:800;cursor:pointer;font-size:12px">✕</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--muted2);font-size:13px">${isEn?'No holidays yet — add below or upload Excel/image':'अभी कोई holiday नहीं — नीचे जोड़ें या Excel/Image upload करें'}</td></tr>`;
+
+  openModal(`<div class="modal-handle"></div>
+  <div class="modal-title">📅 ${isEn?'Holiday List':'Holiday List'}</div>
+  <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.5">
+    ${isEn?'Add <b>Date + Reason</b>. You can also upload Excel (<code>Date | Reason</code>) or a snapshot image.':'Manager यहाँ <b>Date + Reason</b> जोड़ सकता है। Excel या snapshot image भी upload हो सकती है।'}
+  </div>
+
+  <div style="overflow-x:auto;border:1px solid var(--border2);border-radius:12px;margin-bottom:12px">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--card2)">
+          <th style="text-align:left;padding:10px 6px;font-size:11px;color:var(--muted2)">${isEn?'Date':'Date'}</th>
+          <th style="text-align:left;padding:10px 6px;font-size:11px;color:var(--muted2)">${isEn?'Reason':'Reason'}</th>
+          <th style="width:44px"></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+
+  <div style="font-size:12px;font-weight:800;color:#f59e0b;margin:4px 0 8px">➕ ${isEn?'Add holiday':'Add holiday'}</div>
+  <div style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:8px;margin-bottom:14px;align-items:end">
+    <div>
+      <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">${isEn?'Date':'Date'}</div>
+      <input type="date" id="hl_date" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;box-sizing:border-box">
+    </div>
+    <div>
+      <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">${isEn?'Reason':'Reason'}</div>
+      <input type="text" id="hl_reason" placeholder="${isEn?'e.g. Diwali / Company holiday':'e.g. Diwali / Company holiday'}" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;box-sizing:border-box">
+    </div>
+    <button type="button" onclick="_addHolidayItem()" style="padding:10px 14px;border-radius:10px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-weight:900;cursor:pointer;font-size:13px;white-space:nowrap">${isEn?'Add':'Add'}</button>
+  </div>
+
+  <div style="font-size:12px;font-weight:800;color:#38bdf8;margin:8px 0 6px">📊 ${isEn?'Excel import':'Excel import'}</div>
+  <div style="font-size:11px;color:var(--muted2);margin-bottom:8px;line-height:1.45">
+    ${isEn?'Columns: <b>Date</b> | <b>Reason</b> (first row = header).':'Columns: <b>Date</b> | <b>Reason</b>'}
+  </div>
+  <input type="file" id="hl_excel" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="_importHolidayExcel(this)">
+  <button type="button" class="cancel-btn" style="margin-bottom:12px" onclick="document.getElementById('hl_excel').click()">📂 ${isEn?'Choose Excel / CSV':'Choose Excel / CSV'}</button>
+
+  <div style="font-size:12px;font-weight:800;color:#a78bfa;margin:8px 0 6px">🖼️ ${isEn?'Snapshot image (optional)':'Snapshot image (optional)'}</div>
+  <input type="file" id="hl_img" accept="image/*" style="display:none" onchange="_importHolidayImage(this)">
+  <button type="button" class="cancel-btn" style="margin-bottom:8px" onclick="document.getElementById('hl_img').click()">📷 ${isEn?'Upload image':'Upload image'}</button>
+  ${(_holidayDraft.snapshotUrl?`<div style="margin:8px 0 12px"><img src="${_holidayDraft.snapshotUrl}" style="max-width:100%;max-height:160px;border-radius:10px;border:1px solid var(--border2)"><div style="margin-top:6px"><button type="button" onclick="_holidayDraft.snapshotUrl=null;_renderHolidayListModal()" style="font-size:12px;color:#f43f5e;background:none;border:none;cursor:pointer;font-weight:700">${isEn?'Remove image':'Remove image'}</button></div></div>`:'')}
+
+  <button class="submit-btn" style="margin-top:8px" onclick="_saveHolidayListUI()">✅ ${isEn?'Save Holiday List':'Save Holiday List'}</button>
+  <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
+}
+
+function _addHolidayItem(){
+  const isEn = (_lang==='en');
+  const dateEl = document.getElementById('hl_date');
+  const reasonEl = document.getElementById('hl_reason');
+  const date = (dateEl&&dateEl.value||'').trim();
+  const reason = (reasonEl&&reasonEl.value||'').trim();
+  if(!date){ toast(isEn?'⚠️ Select a date':'⚠️ Date चुनें'); return; }
+  if(!reason){ toast(isEn?'⚠️ Enter reason':'⚠️ Reason लिखें'); return; }
+  _holidayDraft.items = (_holidayDraft.items||[]).filter(x=>x.date!==date);
+  _holidayDraft.items.push({ id:'h_'+Date.now(), date, reason });
+  _holidayDraft.items.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  _renderHolidayListModal();
+}
+
+function _removeHolidayItem(idx){
+  _holidayDraft.items.splice(idx,1);
+  _renderHolidayListModal();
+}
+try{ window.openHolidayListModal = openHolidayListModal; }catch(e){}
+
 
 function _parseHolidayDate(raw){
   if(raw == null || raw === '') return '';

@@ -1,7 +1,7 @@
 
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, get, onValue, push, update, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-  import { getAuth, signInWithCustomToken, signInAnonymously, signOut, onAuthStateChanged, signInWithPhoneNumber, RecaptchaVerifier } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getAuth, signInWithCustomToken, signInAnonymously, signOut, onAuthStateChanged, signInWithPhoneNumber, RecaptchaVerifier, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
   import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
@@ -19,12 +19,26 @@
     const app = initializeApp(firebaseConfig);
     const db  = getDatabase(app);
     const auth = getAuth(app);
+    // Persist Phone Auth across tabs/reloads on THIS device (laptop and phone are separate sessions)
+    try{ setPersistence(auth, browserLocalPersistence).catch(()=>{}); }catch(e){}
     const functions = getFunctions(app);
     // ── SECURITY: Keep Firebase refs in a closure, NOT on window ──
     const _fbStore = { db, ref, set, get, onValue, push, update, remove };
     window._fbAccess = async function(op, path, val){
-      // Auto-reauthenticate if Firebase Auth expired (prevents rule denials)
+      // Auto-reauthenticate only for reads/boot. For writes: if no user, try anon ONLY when
+      // there is no saved manager/admin session (otherwise caller must Phone OTP — multi-device OK).
       if(op !== 'get' && op !== 'onValue' && !auth.currentUser){
+        let isElevatedSession = false;
+        try{
+          const raw = localStorage.getItem('mp_session') || sessionStorage.getItem('mp_session_bak');
+          if(raw){
+            const s = JSON.parse(raw);
+            isElevatedSession = !!(s && (s.role==='manager' || s.role==='admin'));
+          }
+        }catch(e){}
+        if(isElevatedSession){
+          return Promise.reject(new Error('PERMISSION_DENIED: Phone verify required on this device'));
+        }
         try{ await signInAnonymously(auth); }catch(e){ console.warn('[fbAccess] re-auth failed:', e.message); }
       }
       
@@ -52,7 +66,14 @@
     window._fbRecaptchaVerifierClass = RecaptchaVerifier;
     window._fbSignInWithPhoneNumber = signInWithPhoneNumber;
     window._fbSignInWithToken = (token) => signInWithCustomToken(auth, token);
-    window._fbSignInAnon = () => signInAnonymously(auth);
+    window._fbSignInAnon = async () => {
+      try{
+        if(auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.phoneNumber){
+          return auth.currentUser; // keep Phone session — multi-device: other devices unaffected
+        }
+      }catch(e){}
+      return signInAnonymously(auth);
+    };
     window._fbSignOut = () => signOut(auth);
     // ── Phone OTP Auth ──
     window._fbSendOTP = async function(phoneNumber){
