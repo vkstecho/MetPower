@@ -3400,6 +3400,31 @@ function showLoginErr(msg){
 // ════════════════════════════════════════
 // LAUNCH
 // ════════════════════════════════════════
+
+/** Ensure Firebase RTDB role nodes match SESSION so security rules allow writes.
+ *  Managers: managers/{auth.uid}=true when phone-auth user is approved manager.
+ *  Admins: admins/{auth.uid}=true for hardcoded admin phones or SESSION.role=admin.
+ */
+async function _syncAuthRoleNodes(){
+  try{
+    const auth = window._fbAuth;
+    if(!auth || !auth.currentUser) return;
+    const uid = auth.currentUser.uid;
+    if(!uid) return;
+    const phone = (auth.currentUser.phoneNumber || '').replace(/\s/g,'');
+    const hardAdminPhones = ['+918929397949','+918929394920'];
+    const isHardAdmin = hardAdminPhones.includes(phone);
+    // Admin session or hardcoded admin phone → admins/{uid}
+    if(SESSION.role === 'admin' || isHardAdmin){
+      try{ await fbSet('admins/'+uid, true); }catch(e){ console.warn('[roleSync] admins write:', e.message); }
+    }
+    // Manager (SESSION or approved mobileUsers) → managers/{uid}
+    if(SESSION.role === 'manager' || isMgr()){
+      try{ await fbSet('managers/'+uid, true); }catch(e){ console.warn('[roleSync] managers write:', e.message); }
+    }
+  }catch(e){ console.warn('[roleSync]', e.message); }
+}
+
 async function launchApp(){
   try{
   warmShiftConfigCache();
@@ -3409,6 +3434,8 @@ async function launchApp(){
       await window._fbSignInAnon();
     }
   }catch(e){ console.warn('[launchApp] Firebase auth restore:', e.message); }
+  // Sync managers/{uid} or admins/{uid} so RTDB rules allow schedule writes
+  try{ await _syncAuthRoleNodes(); }catch(e){}
 
   // ── Reset all overlapping screens ──
   const _hide = id => { const el=document.getElementById(id); if(el){ el.style.display='none'; el.classList && el.classList.remove('show'); }};
@@ -12379,7 +12406,7 @@ function _updateSaveBar(){
   // List each pending change
   list.innerHTML = entries.map(e=>{
     const fmtD = new Date(e.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short'});
-    const shiftBg = {'D':'#f59e0b','N':'#4f46e5','O':'#334155','L':'#be123c','G':'#0284c7','C/O':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'};
+    const shiftBg = {'D':'#f59e0b','N':'#4f46e5','O':'#334155','L':'#be123c','G':'#0284c7','C/O':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488','GP':'#6d28d9','A':'#16a34a','B':'#db2777','C':'#0891b2'};
     const bg = shiftBg[e.newShift] || '#444';
     return `<div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.04);border-radius:8px;padding:8px 10px">
       <span style="display:inline-flex;width:30px;height:26px;background:${bg};border-radius:5px;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;flex-shrink:0">${cellDisp(e.newShift)}</span>
@@ -12442,12 +12469,16 @@ async function saveAllShiftChanges(){
       updates[e.empId+'_'+e.date] = e.newShift;
     }
 
-    // Clear pending BEFORE saving (prevents re-render conflict)
     const savedEntries = [...entries];
-    _pendingShiftChanges = {};
+
+    // Ensure role nodes exist before write (fixes PERMISSION_DENIED for managers)
+    try{ await _syncAuthRoleNodes(); }catch(e){}
 
     // Save only the changed keys using fbUpdate (atomic per-key write)
+    // Clear pending ONLY after success so a failed save keeps the Save bar
     await fbUpdate('overrides', updates);
+
+    _pendingShiftChanges = {};
 
     // Update local cache immediately
     const newCache = {...(getOverrides()||{}), ...updates};
@@ -12455,6 +12486,7 @@ async function saveAllShiftChanges(){
 
     // Restore button and re-render
     restoreBtn();
+    _updateSaveBar();
     renderSchedule();
 
     toast(`✅ ${savedEntries.length} बदलाव save हुए`);
@@ -12596,9 +12628,31 @@ async function saveAllShiftChanges(){
   }catch(err){
     console.error('saveAllShiftChanges error:', err);
     restoreBtn();
-    // Restore pending changes since save failed
-    // (they were already cleared, so show error and let user retry)
-    toast('❌ Save failed: '+(err.message||'Network error')+' — कृपया दोबारा try करें');
+    // Pending was NOT cleared on failure — keep Save bar so user can retry
+    try{ _updateSaveBar(); }catch(e){}
+    const msg = (err && (err.message||err.code)) || 'Network error';
+    const isPerm = /permission|PERMISSION_DENIED/i.test(String(msg));
+    const friendly = isPerm
+      ? '❌ Permission Denied — Manager/Admin के रूप में OTP से दोबारा Login करें, फिर Save करें'
+      : ('❌ Save failed: '+msg+' — कृपया दोबारा try करें');
+    toast(friendly);
+    // High-contrast inline error in Save bar
+    try{
+      const list = document.getElementById('saveBarList');
+      if(list){
+        const errId = 'saveBarPermErr';
+        let errEl = document.getElementById(errId);
+        if(!errEl){
+          errEl = document.createElement('div');
+          errEl.id = errId;
+          list.parentNode.insertBefore(errEl, list);
+        }
+        errEl.style.cssText = 'background:rgba(244,63,94,.18);border:1.5px solid #f43f5e;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#fecdd3;font-size:12px;font-weight:800;line-height:1.45';
+        errEl.innerHTML = isPerm
+          ? '⛔ <b>PERMISSION_DENIED</b><br>Schedule save के लिए Manager/Admin OTP login ज़रूरी है। Logout → Phone OTP से Login → फिर Save करें।'
+          : ('⛔ Save error: '+String(msg).replace(/</g,'&lt;'));
+      }
+    }catch(e2){}
   }
 }
 
@@ -12803,7 +12857,7 @@ function confirmLeaveWithReason(empId, empName, date, currentShift){
 }
 
 function editShiftCell(empId, empName, date, currentShift){
-  if(!isAdminOrMgr()){ return; }
+  if(!canEditSchedule()){ return; }
 
   const _cfg = getShiftConfigSync();
   const _fixedShiftStyle = {

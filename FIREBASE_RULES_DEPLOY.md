@@ -76,3 +76,24 @@ firebase deploy --only database
 - Some paths (`leaves`, `reports`, `attendance`) stay writable by any signed-in user so workers can still apply leave / submit reports. Tighten further later if needed.  
 - Rules are not a substitute for validating data shape; add `.validate` rules over time.
 
+## 2026-09-25 update — schedule PERMISSION_DENIED fix
+
+Rules for `overrides`, `schedules`, `employees`, `shiftConfigs` (and related) now also allow writes when:
+
+1. Hardcoded admin phones, or
+2. `/admins/{uid} === true`, or
+3. `/managers/{uid} === true`, or
+4. **Phone OTP user** is an **approved manager** in `mobileUsers` (10-digit key or full phone key)
+
+App also auto-writes `managers/{auth.uid}=true` (or `admins/...`) on login via `_syncAuthRoleNodes()`.
+
+### After uploading this rules file
+1. Firebase Console → Realtime Database → Rules → paste `database.rules.json` → **Publish**
+2. Managers: **Logout → Login again with Phone OTP** (not anonymous session)
+3. Edit a shift → Save — should succeed
+
+### One-time optional (if still denied)
+Firebase Console → Authentication → copy manager **UID** → RTDB:
+```
+managers/<UID>: true
+```
