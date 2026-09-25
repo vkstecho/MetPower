@@ -383,6 +383,87 @@ body{
 }
 /* Light mode: login screen stays dark for brand consistency */
 body.light #loginScreen { background:linear-gradient(160deg,#070c15 0%,#0d1623 45%,#130a24 100%) !important; }
+
+/* ══ Login screen — high-contrast text (fix faded labels) ══ */
+#loginScreen,
+#loginScreen .login-card,
+#loginScreen .inp-field,
+#loginScreen .big-btn {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+#loginScreen .login-card {
+  color: #f1f5f9 !important;
+}
+/* Labels & helper text on login: was muted2 / #64748b — too faded on dark card */
+#loginScreen .login-card [style*="color:var(--muted2)"],
+#loginScreen .login-card [style*="color:#64748b"],
+#loginScreen .login-card [style*="color:#94a3b8"],
+#loginScreen #otpSentTo,
+#loginScreen #otpResendTimer,
+#loginScreen .login-step-sub {
+  color: #cbd5e1 !important;
+  -webkit-text-fill-color: #cbd5e1 !important;
+  opacity: 1 !important;
+}
+#loginScreen .login-card [style*="font-weight:900"],
+#loginScreen .login-card [style*="color:#fff"],
+#loginScreen [style*="color:#fff"] {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+/* Title gradient on login — keep vivid */
+#loginScreen [style*="background-clip:text"],
+#loginScreen [style*="-webkit-background-clip:text"] {
+  opacity: 1 !important;
+}
+#loginScreen .big-btn {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  font-weight: 800 !important;
+  opacity: 1;
+}
+#loginScreen .big-btn:disabled,
+#loginScreen .big-btn[disabled] {
+  opacity: 0.55 !important;
+  color: #fff !important;
+}
+#loginScreen .big-btn:not(:disabled) {
+  opacity: 1 !important;
+}
+#loginScreen .inp-field {
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  background: #1e293b !important;
+  border-color: rgba(148,163,184,0.45) !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+}
+#loginScreen .inp-field::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+/* +91 prefix chip */
+#loginScreen .login-card > div > div[style*="background:#1e293b"] {
+  color: #e2e8f0 !important;
+}
+body.light #loginScreen .login-card {
+  background: rgba(15, 23, 42, 0.96) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+}
+body.light #loginScreen #otpSentTo,
+body.light #loginScreen [style*="color:#64748b"] {
+  color: #cbd5e1 !important;
+  -webkit-text-fill-color: #cbd5e1 !important;
+}
+/* Prevent light-mode global #fff→dark rewrite from fading login */
+body.light #loginScreen [style*="color:#fff"],
+body.light #loginScreen .login-card [style*="color:#fff"] {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
 body.light .login-card { background:rgba(17,29,46,0.92) !important; border-color:rgba(255,255,255,.1) !important; }
 body.light .login-step-title,
 body.light .login-card .login-step-sub { color:rgba(255,255,255,.65) !important; -webkit-text-fill-color:rgba(255,255,255,.65) !important; }
@@ -2263,4 +2344,34 @@ body.light .team-btn-delete {
   body {
     padding-bottom: 24px;
   }
+}
+
+/* Custom date control — compact icon, never vertical text */
+#customRangeBtn.sched-date-btn,
+#resetRangeBtn.sched-date-btn {
+  width: 42px !important;
+  min-width: 42px !important;
+  max-width: 42px !important;
+  height: 42px !important;
+  padding: 0 !important;
+  font-size: 18px !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  flex-shrink: 0 !important;
+}
+.sched-nav {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+}
+.sched-nav .sched-lbl {
+  flex: 1 1 auto !important;
+  text-align: center !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }

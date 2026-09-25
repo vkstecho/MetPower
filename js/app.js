@@ -971,8 +971,11 @@ function _defaultShiftConfig(){
     minSlit: 3,
     minSup: 2,
     minBySec: {},
-    hideSummaryDN: false,   // Profile: hide D & N count rows
-    hideSummaryABC: false,  // Profile: hide A, B, C count rows
+    hideSummaryDN: false,   // Profile: hide D & N count rows + legend
+    hideSummaryABC: false,  // Profile: hide A, B, C count rows + legend
+    // WhatsApp message when schedule is saved (placeholders: {name} {changes} {manager} {date})
+    waShiftTemplate: '🔔 *MET Power — Shift Update*\n\nनमस्ते *{name}*,\n\nआपकी shift में बदलाव हुआ है:\n{changes}\n\nकोई सवाल हो तो Manager से संपर्क करें।\n_— {manager}_',
+    waNotifyOnSave: true,
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
     updatedAt: null
@@ -1273,14 +1276,20 @@ function applyLang(){
     'empUploadBtn':        {hi:'📤 Shift Upload',         en:'📤 Shift Upload'},
     'empUploadWizardBtn':  {hi:'👤 Emp Upload',           en:'👤 Emp Upload'},
     'empReorderBtn':       {hi:'↕️ क्रम बदलें',         en:'↕️ Reorder'},
-    'customRangeBtn':      {hi:'🗓️ कस्टम तारीख चुनें', en:'🗓️ Pick Custom Date'},
+    'customRangeBtn':      {hi:'🗓️', en:'🗓️'},  // icon-only; full label via title/aria
   };
   Object.entries(schedBtnMap).forEach(([id,txt])=>{
     const el = document.getElementById(id);
     if(!el) return;
-    // Don't override Multi-Select if it's currently in active "Saaf" mode
     el.textContent = isEn ? txt.en : txt.hi;
   });
+  try{
+    const cr = document.getElementById('customRangeBtn');
+    if(cr){
+      cr.textContent = '🗓️';
+      cr.setAttribute('title', isEn ? 'Pick custom dates' : 'कस्टम तारीख चुनें');
+    }
+  }catch(e){}
 
   // Multi-Select button (special — has dynamic states)
   const msBtn = document.getElementById('msToggleBtn');
@@ -1442,8 +1451,49 @@ function isSupervisor(){
 }
 function isAdminOrMgr(){ return isAdmin() || isMgr(); }
 function isGuest(){ return SESSION.role==='guest'; }
-function canEditSchedule(){ return isAdmin() || isMgr(); }
+
+/** Team authorization levels (set by Manager on each member) */
+function _myEmployeeRecord(){
+  try{
+    if(SESSION.empObjId){
+      const e = (_cache.employees||[]).find(x=>x.id===SESSION.empObjId);
+      if(e) return e;
+    }
+    const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+    if(mob) return (_cache.employees||[]).find(x=>_normMobileKey(x.phone||x.mobile||'')===mob) || null;
+  }catch(e){}
+  return null;
+}
+function myTeamPerms(){
+  if(isAdmin() || isMgr()) return { schedule:true, leave:true, reports:true, team:true, full:true };
+  const e = _myEmployeeRecord();
+  const p = (e && e.perms) || {};
+  return {
+    schedule: !!p.schedule,
+    leave: !!p.leave,
+    reports: !!p.reports,
+    team: false,
+    full: false
+  };
+}
+/** Manager of this team OR delegated schedule rights */
+function canEditSchedule(){ return isAdmin() || isMgr() || myTeamPerms().schedule; }
+/** Approve leave for team */
+function canApproveLeave(){ return isAdmin() || isMgr() || myTeamPerms().leave; }
+/** File/act on reports about members */
+function canManageReports(){ return isAdmin() || isMgr() || myTeamPerms().reports; }
+/** Legacy: many UI spots use isAdminOrMgr — include delegates for operational tools */
+function isTeamOperator(){ return isAdmin() || isMgr() || myTeamPerms().schedule || myTeamPerms().leave || myTeamPerms().reports; }
 function canEditInst(){ return isAdmin() || SESSION.name===CFG.supervisorInstructor || isMgr(); }
+/** True if this employee record is the logged-in manager (same mobile) */
+function isManagerSelfRecord(emp){
+  if(!emp || !isMgr()) return false;
+  const mine = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  const theirs = _normMobileKey(emp.phone||emp.mobile||'');
+  if(mine && theirs && mine === theirs) return true;
+  if(SESSION.empObjId && emp.id === SESSION.empObjId) return true;
+  return false;
+}
 function myEmp(){ return getEmps().find(e=>e.id===SESSION.empObjId)||null; }
 
 // ── DEVICE FINGERPRINT ──
@@ -1982,6 +2032,13 @@ async function _checkUserAfterOTP(){
       if(userData.status==='revoked'){
         toast('🚫 आपकी access revoke कर दी गई है। VKS Tech से संपर्क करें: +91-8929394920'); return;
       }
+      // Manager left team earlier — treat as fresh user (can re-register / join again)
+      if(userData.status==='left_team' || userData.status==='left'){
+        try{ await fbRemove('mobileUsers/'+mobile); }catch(e){}
+        toast('👋 Previous team left — register again as Manager or Member');
+        showStep(3);
+        return;
+      }
       if(userData.status==='approved'){
         if(userData.validTill && new Date(userData.validTill)<new Date()){
           toast('⏰ आपकी access expire हो गई है। Admin से validity बढ़वाएं: +91-8929394920'); return;
@@ -2138,10 +2195,47 @@ function _launchAsNewUser(userData){
   SESSION.companyId=_normCompanyId(userData.company);
   SESSION.managerId=userData.managerId||'';
   SESSION.mobile=userData.mobile;
+  SESSION.empId=userData.empId||userData.empCode||'';
+  SESSION.empObjId=userData.empObjId||userData.employeeId||'';
   SESSION.newUser=true;
   SESSION.loginAt=new Date().toISOString();
+  // Link to employees/{id} by mobile so in-app notifications work
+  try{
+    const mob = _normMobileKey(userData.mobile||'');
+    const all = (_cache.employees||[]);
+    let match = all.find(e => _normMobileKey(e.phone||e.mobile||'') === mob);
+    if(!match && SESSION.empId){
+      match = all.find(e => String(e.empId||'').trim().toUpperCase() === String(SESSION.empId).trim().toUpperCase());
+    }
+    if(match){
+      SESSION.empObjId = match.id;
+      SESSION.empId = match.empId || SESSION.empId;
+      if(!SESSION.name) SESSION.name = match.name;
+    }
+  }catch(e){}
   saveSession();
   launchApp();
+  // Resolve emp link after employees load (cache may still be empty at login)
+  setTimeout(()=>{ try{ _resolveSessionEmpLink(); }catch(e){} }, 1500);
+  setTimeout(()=>{ try{ _resolveSessionEmpLink(); listenUserShiftNotifications(); }catch(e){} }, 4000);
+}
+
+/** Match logged-in mobile user to employees record for notifications */
+function _resolveSessionEmpLink(){
+  if(SESSION.role!=='member' && SESSION.role!=='manager' && SESSION.role!=='worker') return;
+  const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  if(!mob) return;
+  const all = (_cache.employees||[]);
+  let match = all.find(e => _normMobileKey(e.phone||e.mobile||'') === mob);
+  if(!match && SESSION.empId){
+    match = all.find(e => String(e.empId||'').trim().toUpperCase() === String(SESSION.empId).trim().toUpperCase());
+  }
+  if(match && SESSION.empObjId !== match.id){
+    SESSION.empObjId = match.id;
+    SESSION.empId = match.empId || SESSION.empId;
+    saveSession();
+    try{ listenUserShiftNotifications(); }catch(e){}
+  }
 }
 
 
@@ -3350,7 +3444,20 @@ async function launchApp(){
   if(isAdmin()){ rt.textContent='🛡️ ADMIN'; rt.className='role-tag admin'; }
   else if(isMgr() || SESSION.role==='manager'){ rt.textContent='🏅 MANAGER'; rt.className='role-tag'; rt.style.cssText='background:rgba(168,85,247,.2);color:#a855f7;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
   else if(isSupervisor()){ rt.textContent='👁️ SUPERVISOR'; rt.className='role-tag'; rt.style.cssText='background:rgba(56,189,248,.15);color:#38bdf8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
-  else if(SESSION.role==='member'){ rt.textContent='👤 MEMBER'; rt.className='role-tag'; rt.style.cssText='background:rgba(96,165,250,.15);color:#60a5fa;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
+  else if(SESSION.role==='member'){
+    const tp = myTeamPerms();
+    if(tp.schedule||tp.leave||tp.reports){
+      const bits=[];
+      if(tp.schedule) bits.push('Schedule');
+      if(tp.leave) bits.push('Leave');
+      if(tp.reports) bits.push('Reports');
+      rt.textContent='⚡ '+bits.join('/');
+      rt.className='role-tag';
+      rt.style.cssText='background:rgba(168,85,247,.18);color:#c084fc;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif';
+    } else {
+      rt.textContent='👤 MEMBER'; rt.className='role-tag'; rt.style.cssText='background:rgba(96,165,250,.15);color:#60a5fa;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif';
+    }
+  }
   else if(isGuest()){ 
     const co = SESSION.company||'GUEST';
     rt.textContent = co !== 'GLS' ? '🏢 '+co : '👤 GUEST'; 
@@ -3658,18 +3765,32 @@ function _renderShiftSettingsModal(){
   <div style="font-size:11px;font-weight:800;color:#94a3b8;margin:4px 0 6px">Per machine / section</div>
   <div id="ss_minBySec" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">${_renderMinBySecRows()}</div>
 
-  <div style="font-size:12px;font-weight:800;color:#a78bfa;margin:16px 0 6px">👁 Summary count rows (Schedule)</div>
-  <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.45">Hide daily headcount rows you do not need. Shift cells stay the same — only bottom count rows are hidden.</div>
+  <div style="font-size:12px;font-weight:800;color:#a78bfa;margin:16px 0 6px">👁 Hide shifts from Schedule</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.45">Hidden codes disappear from <b>bottom legend</b>, daily count rows, and shift picker. Untick a shift above (A/B/C) to disable it completely.</div>
   <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);cursor:pointer">
       <input type="checkbox" ${d.hideSummaryDN?'checked':''} onchange="_shiftDraft.hideSummaryDN=this.checked" style="width:18px;height:18px;accent-color:#f59e0b">
-      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#f59e0b">D</b> &amp; <b style="color:#818cf8">N</b> counts</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#f59e0b">D</b> &amp; <b style="color:#818cf8">N</b> (counts + legend + picker)</span>
     </label>
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);cursor:pointer">
       <input type="checkbox" ${d.hideSummaryABC?'checked':''} onchange="_shiftDraft.hideSummaryABC=this.checked" style="width:18px;height:18px;accent-color:#16a34a">
-      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#16a34a">A</b> / <b style="color:#db2777">B</b> / <b style="color:#0891b2">C</b> counts</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text)">Hide <b style="color:#16a34a">A</b> / <b style="color:#db2777">B</b> / <b style="color:#0891b2">C</b> (counts + legend + picker)</span>
     </label>
   </div>
+
+  <div style="font-size:12px;font-weight:800;color:#22c55e;margin:16px 0 6px">📲 WhatsApp on schedule change</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.45">
+    When you save shift changes, team members get WhatsApp (if mobile is saved). Edit the message below.<br>
+    Placeholders: <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{name}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{changes}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{manager}</code>
+  </div>
+  <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);cursor:pointer;margin-bottom:8px">
+    <input type="checkbox" ${d.waNotifyOnSave!==false?'checked':''} onchange="_shiftDraft.waNotifyOnSave=this.checked" style="width:18px;height:18px;accent-color:#22c55e">
+    <span style="font-size:13px;font-weight:700;color:var(--text)">Send WhatsApp after Save</span>
+  </label>
+  <textarea id="ss_waTemplate" rows="7" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box"
+    oninput="_shiftDraft.waShiftTemplate=this.value">${(d.waShiftTemplate||'').replace(/</g,'&lt;')}</textarea>
 
   <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
   <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
@@ -3774,6 +3895,14 @@ async function _saveShiftSettings(){
   _shiftDraft.minSup = Number(_shiftDraft.minSup)||0;
   _shiftDraft.hideSummaryDN = !!_shiftDraft.hideSummaryDN;
   _shiftDraft.hideSummaryABC = !!_shiftDraft.hideSummaryABC;
+  _shiftDraft.waNotifyOnSave = _shiftDraft.waNotifyOnSave !== false;
+  try{
+    const ta = document.getElementById('ss_waTemplate');
+    if(ta) _shiftDraft.waShiftTemplate = ta.value;
+  }catch(e){}
+  if(!_shiftDraft.waShiftTemplate){
+    _shiftDraft.waShiftTemplate = getDefaultShiftConfig().waShiftTemplate;
+  }
   if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
   const ok=await saveShiftConfig(_shiftDraft);
   if(ok){
@@ -3782,6 +3911,141 @@ async function _saveShiftSettings(){
   }
 }
 
+
+
+// ════════════════════════════════════════
+// PROFILE EDIT — name + photo
+// ════════════════════════════════════════
+let _profilePhotoData = null;
+
+function openEditProfileModal(){
+  _profilePhotoData = null;
+  const photo = SESSION.photoUrl || '';
+  const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">✏️ ${isEn?'Edit Profile':'Profile Edit करें'}</div>
+    <div style="text-align:center;margin-bottom:16px">
+      <div id="profilePhotoPreview" style="width:96px;height:96px;border-radius:50%;margin:0 auto 10px;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:900;color:#fff;overflow:hidden;border:3px solid rgba(249,115,22,.4)">
+        ${photo?`<img src="${photo}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}
+      </div>
+      <input type="file" id="profilePhotoInput" accept="image/*" capture="user" style="display:none" onchange="onProfilePhotoPicked(this)">
+      <button type="button" class="cancel-btn" style="display:inline-flex;align-items:center;gap:6px;margin:0 4px" onclick="document.getElementById('profilePhotoInput').click()">📷 ${isEn?'Set photo':'फोटो लगाएं'}</button>
+      ${photo||_profilePhotoData?`<button type="button" class="cancel-btn" style="display:inline-flex;color:#f43f5e;margin:0 4px" onclick="clearProfilePhoto()">🗑️</button>`:''}
+    </div>
+    <div class="field">
+      <label>${isEn?'Name':'नाम'}</label>
+      <input class="inp-field" id="profileNameInput" value="${(SESSION.name||'').replace(/"/g,'&quot;')}" maxlength="60">
+    </div>
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:12px;line-height:1.4">
+      ${isEn?'Photo is stored securely and shown on your profile & header.':'फोटो सुरक्षित सेव होगी — profile और header पर दिखेगी।'}
+    </div>
+    <button class="submit-btn" onclick="saveProfileEdits()">💾 ${isEn?'Save':'सेव करें'}</button>
+    <button class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
+}
+
+function onProfilePhotoPicked(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  if(file.size > 5*1024*1024){ toast('⚠️ Max 5 MB image'); return; }
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const dataUrl = reader.result;
+    // Downscale for storage
+    const img = new Image();
+    img.onload = ()=>{
+      const max = 512;
+      let w = img.width, h = img.height;
+      if(w > max || h > max){
+        const r = Math.min(max/w, max/h);
+        w = Math.round(w*r); h = Math.round(h*r);
+      }
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      _profilePhotoData = c.toDataURL('image/jpeg', 0.85);
+      const prev = document.getElementById('profilePhotoPreview');
+      if(prev) prev.innerHTML = `<img src="${_profilePhotoData}" style="width:100%;height:100%;object-fit:cover">`;
+    };
+    img.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearProfilePhoto(){
+  _profilePhotoData = '';
+  SESSION.photoUrl = '';
+  const prev = document.getElementById('profilePhotoPreview');
+  if(prev) prev.innerHTML = (SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2);
+  toast('Photo cleared — Save to apply');
+}
+
+async function saveProfileEdits(){
+  const name = (document.getElementById('profileNameInput')?.value||'').trim();
+  if(!name){ toast('⚠️ Name required'); return; }
+  const btn = document.querySelector('.modal-box .submit-btn, .modal .submit-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Saving…'; }
+
+  try{
+    let photoUrl = SESSION.photoUrl || '';
+    if(_profilePhotoData === ''){
+      photoUrl = '';
+    } else if(_profilePhotoData){
+      const key = _normMobileKey(SESSION.mobile||SESSION.uid||SESSION.empObjId||'user') || ('u_'+Date.now());
+      const path = 'profilePhotos/'+key+'/avatar.jpg';
+      if(typeof window._fbUploadSelfie === 'function'){
+        const url = await window._fbUploadSelfie(_profilePhotoData, path);
+        if(url) photoUrl = url;
+        else toast('⚠️ Photo upload failed — name will still save');
+      } else {
+        // Fallback: store small data URL in RTDB only if tiny
+        if(_profilePhotoData.length < 200000) photoUrl = _profilePhotoData;
+        else toast('⚠️ Storage not ready — try again');
+      }
+    }
+
+    SESSION.name = name;
+    SESSION.photoUrl = photoUrl;
+    try{ saveSession(); }catch(e){}
+
+    // Persist to mobileUsers + employee record
+    const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+    if(mob){
+      try{
+        await fbUpdate('mobileUsers/'+mob, {
+          name,
+          photoUrl: photoUrl || null,
+          profileUpdatedAt: new Date().toISOString()
+        });
+      }catch(e){ console.warn('mobileUsers photo', e); }
+    }
+    if(SESSION.empObjId){
+      try{
+        await fbUpdate('employees/'+SESSION.empObjId, {
+          name: name.toUpperCase(),
+          photoUrl: photoUrl || null
+        });
+      }catch(e){ console.warn('emp photo', e); }
+    }
+
+    // Refresh header avatar
+    try{
+      const userAvEl = document.getElementById('userAv');
+      if(userAvEl){
+        if(photoUrl) userAvEl.innerHTML = `<img src="${photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+        else userAvEl.textContent = name.split(' ').map(n=>n[0]).join('').substring(0,2);
+      }
+      const userNameEl = document.getElementById('userName');
+      if(userNameEl) userNameEl.textContent = name;
+    }catch(e){}
+
+    closeModal();
+    toast('✅ Profile saved');
+  }catch(err){
+    console.error(err);
+    toast('❌ Save failed: '+(err.message||err));
+    if(btn){ btn.disabled = false; btn.textContent = '💾 Save'; }
+  }
+}
 
 async function showProfile(){
  try{
@@ -3906,6 +4170,11 @@ async function showProfile(){
         <div><div class="pa-label">Company Name बदलें</div><div class="pa-sub">वर्तमान: ${SESSION.company||'—'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
+      ${isMgr()?`<button class="profile-action" onclick="openLeaveTeamModal()" style="border-color:rgba(244,63,94,.35)">
+        <div class="pa-icon" style="background:rgba(244,63,94,.12)">👋</div>
+        <div><div class="pa-label">Leave team / Transfer Manager</div><div class="pa-sub">किसी सदस्य को नया Manager बनाकर टीम छोड़ें</div></div>
+        <div class="pa-arrow">›</div>
+      </button>`:''}
       <button class="profile-action danger" onclick="doLogout()">
         <div class="pa-icon" style="background:rgba(244,63,94,.12)">🚪</div>
         <div><div class="pa-label">Logout</div><div class="pa-sub">सभी sessions साफ़ करें</div></div>
@@ -3924,6 +4193,269 @@ async function showProfile(){
      </button>
    </div>`);
  }
+}
+
+
+// ════════════════════════════════════════
+// MANAGER LEAVES TEAM — automated handoff
+// ════════════════════════════════════════
+/** Rank team members for automatic Manager succession */
+function _rankManagerSuccessors(){
+  const oldKey = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  const team = getEmps().filter(e => e.status!=='resigned' && e.status!=='left' && !isManagerSelfRecord(e));
+  return team.map(e=>{
+    const ph = _normMobileKey(e.phone||e.mobile||'');
+    let score = 0;
+    const reasons = [];
+    if(ph.length===10){ score += 50; reasons.push('mobile'); }
+    else reasons.push('no-mobile');
+    const p = e.perms||{};
+    if(p.schedule){ score += 15; reasons.push('schedule'); }
+    if(p.leave){ score += 10; reasons.push('leave'); }
+    if(p.reports){ score += 10; reasons.push('reports'); }
+    if(e.accessLevel==='manager' || e.isTeamManager){ score += 20; reasons.push('access'); }
+    const des = String(e.designation||e.resp||'').toLowerCase();
+    if(/manager|supervisor|sr\.|senior|incharge|in-charge/.test(des)){ score += 12; reasons.push('title'); }
+    if(e.joiningDate){
+      const yrs = (Date.now() - new Date(e.joiningDate).getTime()) / (365.25*864e5);
+      if(yrs >= 2){ score += 8; reasons.push('senior'); }
+      else if(yrs >= 1){ score += 4; }
+    }
+    return { emp: e, phone: ph, score, reasons, eligible: ph.length===10 };
+  }).sort((a,b)=> b.score - a.score || (a.emp.name||'').localeCompare(b.emp.name||''));
+}
+
+function openLeaveTeamModal(){
+  if(!isMgr()){ toast('❌ Only Manager'); return; }
+  const ranked = _rankManagerSuccessors();
+  const eligible = ranked.filter(r=>r.eligible);
+  if(!eligible.length){
+    openModal(`<div class="modal-handle"></div>
+      <div class="modal-title">👋 Automated Manager Handoff</div>
+      <div style="font-size:13px;color:var(--muted2);line-height:1.65;margin-bottom:14px">
+        No team member has a <b style="color:var(--text)">10-digit mobile</b>. Add mobile numbers on Team, then handoff can run automatically.
+      </div>
+      <button class="cancel-btn" onclick="closeModal()">Close</button>`);
+    return;
+  }
+  const best = eligible[0];
+  const opts = eligible.map((r,i)=>
+    `<option value="${r.emp.id}"${i===0?' selected':''}>${i===0?'⭐ ':''}${r.emp.name} (${r.emp.empId||'—'}) · ${r.phone} · score ${r.score}</option>`
+  ).join('');
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">👋 Automated Manager Handoff</div>
+    <div style="font-size:13px;color:var(--muted2);line-height:1.65;margin-bottom:12px">
+      System recommends the best successor and will:
+      <ul style="margin:8px 0 0 18px;padding:0">
+        <li>Move <b style="color:var(--text)">entire team</b> under the new Manager</li>
+        <li>Promote them to <b style="color:var(--text)">approved Manager</b> (OTP login)</li>
+        <li>Copy shift settings</li>
+        <li>Mark you as <b style="color:#fbbf24">left_team</b> (next login = fresh user)</li>
+        <li>Notify the new Manager (app + WhatsApp if possible)</li>
+      </ul>
+    </div>
+    <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:12px;padding:12px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:800;color:#22c55e;margin-bottom:4px">RECOMMENDED</div>
+      <div style="font-size:16px;font-weight:900;color:var(--text)">${best.emp.name}</div>
+      <div style="font-size:12px;color:var(--muted2)">📱 ${best.phone} · Emp ${best.emp.empId||'—'} · score ${best.score}
+        ${best.reasons.length?` · ${best.reasons.join(', ')}`:''}</div>
+    </div>
+    <div class="field">
+      <label>New Manager (auto-ranked — change if needed)</label>
+      <select class="inp-field" id="leaveTeamSuccessor">${opts}</select>
+    </div>
+    <div class="field">
+      <label>Double-check — type <b style="color:#f43f5e">LEAVE</b> to confirm</label>
+      <input class="inp-field" id="leaveTeamConfirm" placeholder="LEAVE" autocomplete="off"
+        style="letter-spacing:2px;font-weight:800;text-transform:uppercase">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+      <button class="big-btn green" onclick="confirmLeaveTeamTransfer(true)">⚡ Handoff recommended (after LEAVE)</button>
+      <button class="big-btn red" onclick="confirmLeaveTeamTransfer(false)">Transfer selected & leave</button>
+      <button class="cancel-btn" onclick="closeModal()">Cancel</button>
+    </div>
+    <div id="leaveTeamProgress" style="display:none;margin-top:12px;font-size:12px;color:var(--muted2);line-height:1.5"></div>`);
+}
+
+async function confirmLeaveTeamTransfer(useRecommended){
+  if(!isMgr()){ toast('❌ Only Manager'); return; }
+  const conf = (document.getElementById('leaveTeamConfirm')?.value||'').trim().toUpperCase();
+  if(conf !== 'LEAVE'){
+    toast('⚠️ Type LEAVE to confirm — prevents accidental handoff');
+    try{ document.getElementById('leaveTeamConfirm')?.focus(); }catch(e){}
+    return;
+  }
+  const ranked = _rankManagerSuccessors();
+  const eligible = ranked.filter(r=>r.eligible);
+  if(!eligible.length){ toast('❌ No eligible successor'); return; }
+
+  let succId = document.getElementById('leaveTeamSuccessor')?.value;
+  if(useRecommended) succId = eligible[0].emp.id;
+  if(!succId){ toast('⚠️ Select new Manager'); return; }
+
+  const oldKey = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  if(!oldKey){ toast('❌ Manager mobile missing'); return; }
+
+  const team = getEmps();
+  const succ = team.find(e=>e.id===succId) || (_cache.employees||[]).find(e=>e.id===succId);
+  if(!succ){ toast('❌ Member not found'); return; }
+  const newKey = _normMobileKey(succ.phone||succ.mobile||'');
+  if(newKey.length !== 10){
+    toast('❌ Selected member needs a valid 10-digit mobile');
+    return;
+  }
+
+  const prog = document.getElementById('leaveTeamProgress');
+  const setProg = (msg)=>{ if(prog){ prog.style.display='block'; prog.textContent = msg; } };
+  document.querySelectorAll('.modal-box .big-btn, .modal .big-btn').forEach(b=>{ b.disabled = true; });
+
+  try{
+    setProg('1/6 · Transferring team roster…');
+    const toTransfer = team.length ? team : (_cache.employees||[]).filter(e=>e.managerId===oldKey);
+    let n = 0;
+    const updates = {};
+    for(const e of toTransfer){
+      updates['employees/'+e.id+'/managerId'] = newKey;
+      updates['employees/'+e.id+'/previousManagerId'] = oldKey;
+      updates['employees/'+e.id+'/managerTransferredAt'] = new Date().toISOString();
+      n++;
+    }
+    updates['employees/'+succ.id+'/managerId'] = newKey;
+    updates['employees/'+succ.id+'/accessLevel'] = 'manager';
+    updates['employees/'+succ.id+'/isTeamManager'] = true;
+    updates['employees/'+succ.id+'/perms'] = { schedule:true, leave:true, reports:true };
+    // RTDB multi-path update via root
+    try{
+      await window._fbAccess('update', '/', updates);
+    }catch(batchErr){
+      console.warn('batch transfer fallback', batchErr);
+      for(const e of toTransfer){
+        try{
+          await fbUpdate('employees/'+e.id, {
+            managerId: newKey,
+            previousManagerId: oldKey,
+            managerTransferredAt: new Date().toISOString()
+          });
+        }catch(ex){}
+      }
+      await fbUpdate('employees/'+succ.id, {
+        managerId: newKey,
+        accessLevel: 'manager',
+        perms: { schedule:true, leave:true, reports:true },
+        isTeamManager: true
+      });
+    }
+
+    setProg('2/6 · Promoting new Manager login…');
+    let succUser = null;
+    try{ succUser = await fbGet('mobileUsers/'+newKey); }catch(e){}
+    await fbSet('mobileUsers/'+newKey, {
+      ...(succUser||{}),
+      role: 'manager',
+      name: succ.name || succUser?.name || 'Manager',
+      mobile: newKey,
+      company: SESSION.company || succUser?.company || '',
+      companyId: SESSION.companyId || succUser?.companyId || '',
+      status: 'approved',
+      empId: succ.empId || '',
+      empObjId: succ.id,
+      approvedAt: new Date().toISOString(),
+      approvedBy: 'auto_handoff:'+(SESSION.name||oldKey),
+      transferredFrom: oldKey,
+      managerSince: new Date().toISOString()
+    });
+
+    setProg('3/6 · Updating members’ mobile accounts…');
+    try{
+      const allMU = await fbGet('mobileUsers') || {};
+      for(const [mob, rec] of Object.entries(allMU)){
+        if(!rec || typeof rec !== 'object') continue;
+        if(String(rec.managerId||'') === oldKey || String(rec.managerId||'') === '+91'+oldKey){
+          try{
+            await fbUpdate('mobileUsers/'+mob, {
+              managerId: newKey,
+              managerName: succ.name,
+              previousManagerId: oldKey
+            });
+          }catch(ex){}
+        }
+      }
+    }catch(ex){ console.warn('mu transfer', ex); }
+
+    setProg('4/6 · Copying shift settings…');
+    try{
+      const oldCfgKey = ('mgr:'+oldKey).replace(/[:.#$\[\]]/g,'_');
+      const newCfgKey = ('mgr:'+newKey).replace(/[:.#$\[\]]/g,'_');
+      const cfg = await fbGet('shiftConfigs/'+oldCfgKey);
+      if(cfg){
+        await fbSet('shiftConfigs/'+newCfgKey, {
+          ...cfg,
+          transferredFrom: oldKey,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }catch(ex){ console.warn('cfg transfer', ex); }
+
+    setProg('5/6 · Closing your Manager access…');
+    let oldUser = null;
+    try{ oldUser = await fbGet('mobileUsers/'+oldKey); }catch(e){}
+    await fbSet('mobileUsers/'+oldKey, {
+      ...(oldUser||{}),
+      status: 'left_team',
+      role: 'none',
+      leftAt: new Date().toISOString(),
+      leftReason: 'auto_manager_handoff',
+      transferredTo: newKey,
+      transferredToName: succ.name,
+      name: oldUser?.name || SESSION.name,
+      mobile: oldKey
+    });
+
+    setProg('6/6 · Notifying new Manager…');
+    try{
+      await fbPush('adminNotifications', {
+        type: 'manager_left_team',
+        message: (SESSION.name||oldKey)+' auto-handoff → '+(succ.name||newKey),
+        from: oldKey, to: newKey, at: new Date().toISOString()
+      });
+    }catch(e){}
+    try{
+      await fbPush('userNotifications/'+newKey, {
+        type: 'became_manager',
+        title: '🏅 You are now Manager',
+        body: (SESSION.name||'Previous manager')+' transferred the team to you automatically. You manage schedule, leave, and members.',
+        read: false,
+        at: new Date().toISOString()
+      });
+      if(succ.id) await fbPush('userNotifications/'+succ.id, {
+        type: 'became_manager',
+        title: '🏅 You are now Manager',
+        body: (SESSION.name||'Previous manager')+' transferred the team to you.',
+        read: false,
+        at: new Date().toISOString()
+      });
+    }catch(e){}
+
+    // WhatsApp to new manager (user gesture from button click)
+    try{
+      const waMsg = `🏅 *MET Power — You are now Manager*\n\n`+
+        `नमस्ते *${succ.name}*,\n\n`+
+        `*${SESSION.name||'Previous manager'}* ने team आपको transfer कर दी है।\n\n`+
+        `📱 Login: +91 ${newKey}\n`+
+        `👥 Members transferred: ${n}\n\n`+
+        `App खोलकर Manager के रूप में login करें।\n_— MET Power_`;
+      openWA(newKey, waMsg);
+    }catch(e){}
+
+    closeModal();
+    toast('✅ Handoff complete → '+succ.name+' ('+n+' members). Logging out…');
+    setTimeout(()=>{ try{ doLogout(); }catch(e){ location.reload(); } }, 1000);
+  }catch(err){
+    console.error('leave team', err);
+    toast('❌ Handoff failed: '+(err.message||err));
+    setProg('Failed: '+(err.message||err));
+    document.querySelectorAll('.modal-box .big-btn, .modal .big-btn').forEach(b=>{ b.disabled = false; });
+  }
 }
 
 function openExtendAccessModal(){
@@ -5149,7 +5681,7 @@ let _msLongPressTimer = null;
 
 // Each cell tap goes here first
 function handleSchedCellClick(td, empId, empName, date, origSh){
-  if(!isAdminOrMgr()) return; // workers cannot edit
+  if(!canEditSchedule()) return; // workers cannot edit
   if(_msActive){
     // In selection mode: tap toggles cell
     _msToggleCell(td, empId, date);
@@ -5308,7 +5840,7 @@ function clearMultiSelect(){
 }
 
 function toggleSelectMode(){
-  if(!isAdminOrMgr()){ toast('❌ सिर्फ Admin/Manager कर सकते हैं'); return; }
+  if(!canEditSchedule()){ toast('❌ Schedule edit permission नहीं है'); return; }
   if(_msActive){ clearMultiSelect(); return; }
   _msActive = true;
   const btn = document.getElementById('msToggleBtn');
@@ -5323,7 +5855,7 @@ function toggleSelectMode(){
 }
 
 function applyMultiShift(shiftVal){
-  if(!isAdminOrMgr()){ toast('❌ सिर्फ Admin/Manager कर सकते हैं'); return; }
+  if(!canEditSchedule()){ toast('❌ Schedule edit permission नहीं है'); return; }
   if(!_msSelected.size) return;
   if(shiftVal === 'L'){
     // L needs reason — show reason modal for bulk
@@ -5398,7 +5930,7 @@ function confirmBulkLeave(){
 }
 
 function _msCommit(shiftVal, leaveReason, attachment){
-  if(!isAdminOrMgr()){ toast('❌ सिर्फ Admin/Manager कर सकते हैं'); clearMultiSelect(); return; }
+  if(!canEditSchedule()){ toast('❌ Schedule edit permission नहीं है'); clearMultiSelect(); return; }
   const cells = [..._msSelected];
   for(const key of cells){
     const [empId, date] = key.split('|');
@@ -5571,7 +6103,19 @@ function renderScheduleLegend(){
   const el=document.getElementById('schedLegend');
   if(!el) return;
   const cfg=getShiftConfigSync();
-  const cfgShifts=(cfg.shifts&&cfg.shifts.length)?cfg.shifts:[{code:'D',label:'Day'},{code:'N',label:'Night'},{code:'A',label:'A'},{code:'B',label:'B'},{code:'C',label:'C'}];
+  let cfgShifts=(cfg.shifts&&cfg.shifts.length)?cfg.shifts.slice():[
+    {code:'D',label:'Day Shift',active:true},{code:'N',label:'Night Shift',active:true},
+    {code:'A',label:'A Shift',active:false},{code:'B',label:'B Shift',active:false},{code:'C',label:'C Shift',active:false}
+  ];
+  // Hide inactive shifts + Profile "hide D/N" / "hide A/B/C" from bottom legend too
+  cfgShifts = cfgShifts.filter(s=>{
+    if(!s || !s.code) return false;
+    if(s.active === false) return false;
+    const code = String(s.code).toUpperCase();
+    if(cfg.hideSummaryDN && (code==='D'||code==='N')) return false;
+    if(cfg.hideSummaryABC && (code==='A'||code==='B'||code==='C')) return false;
+    return true;
+  });
   let html='';
   cfgShifts.forEach(s=>{
     const code=String(s.code||'').toUpperCase();
@@ -5736,14 +6280,14 @@ function renderSchedule(){
           const origSh = getShift(emp,d);
           const isT=d===TODAY_STR;
           const isRealloc=!!(getOverrides()[emp.id+'_'+d]&&getOverrides()[emp.id+'_'+d]!=='L');
-          const clickable = isAdminOrMgr()
+          const clickable = canEditSchedule()
             ? `data-empid="${emp.id}" data-empname="${emp.name}" data-date="${d}" data-origsh="${origSh}" style="cursor:pointer;${isT?'background:rgba(249,115,22,.05)':''}" onclick="handleSchedCellClick(this,'${emp.id}','${emp.name}','${d}','${origSh}')"`
             : (['L','CO','C/O','OD','Ab','HLF'].includes(sh)
               ? `style="cursor:pointer;${isT?'background:rgba(249,115,22,.05)':''}" onclick="showShiftInfo('${emp.id}','${emp.name.replace(/'/g,"\\'")}','${d}','${sh}')"`
               : `style="${isT?'background:rgba(249,115,22,.05)':''}"`);          if(pending){
             return `<td ${clickable} data-cellkey="${emp.id}_${d}" data-pending="${pendingKey}" data-orig-shift="${origSh}">
               <span class="shc ${cellClass(sh)}" style="outline:2px solid var(--m1);border-radius:4px;box-shadow:0 0 6px rgba(249,115,22,.5)">${cellDisp(sh)}</span>
-              ${isAdminOrMgr()?`<div style="font-size:7px;color:var(--m1);text-align:center;line-height:1;margin-top:1px;font-weight:900">NEW</div>`:''}
+              ${canEditSchedule()?`<div style="font-size:7px;color:var(--m1);text-align:center;line-height:1;margin-top:1px;font-weight:900">NEW</div>`:''}
             </td>`;
           }
           return `<td ${clickable} data-cellkey="${emp.id}_${d}">
@@ -6185,6 +6729,7 @@ function setLF(f,el){ _lvFilter=f; document.querySelectorAll('#leaveFilter .chip
 function renderLeaves(){
   let list = getLeaves().filter(l=> {
     if(isAdmin()) return true;
+    if(canApproveLeave()) return true; // Manager / delegated leave approver sees team leave
     // Own leaves: show all statuses
     if(l.empId===SESSION.empObjId) return true;
     // Others' leaves: show only approved or rejected
@@ -6211,7 +6756,7 @@ function renderLeaves(){
           ${l.reason?`<div style="margin-top:6px;padding:7px 10px;background:var(--card2);border-left:3px solid var(--day);border-radius:0 8px 8px 0;font-size:12px;color:var(--text);font-weight:600">📝 ${escHtml(l.reason)}</div>`:'<div style="margin-top:4px;font-size:11px;color:var(--lv);font-weight:600">⚠️ कारण नहीं दिया गया</div>'}
         </div>
       </div>${ra}
-      ${isAdmin()&&l.status==='pending'?`<div class="action-row">
+      ${canApproveLeave()&&l.status==='pending'?`<div class="action-row">
         <button class="act-btn approve" onclick="actLeave('${l._key}','approved')">✅ मंजूर करें</button>
         <button class="act-btn reject"  onclick="actLeave('${l._key}','rejected')">❌ अस्वीकार</button>
       </div>`:''}
@@ -6356,6 +6901,7 @@ async function submitLeave(){
 }
 
 async function actLeave(key, status){
+  if(!canApproveLeave()){ toast('❌ Leave approve permission नहीं है'); return; }
   const leaves=getLeaves();
   const leave=leaves.find(l=>l._key===key);
   if(!leave) return;
@@ -7110,7 +7656,7 @@ function renderReports(){
           </div>` : ''}
         </div>
       </div>
-      ${isAdmin()&&!isLegacy&&r.status==='pending'?`<div class="action-row">
+      ${(isAdmin()||canManageReports())&&!isLegacy&&r.status==='pending'?`<div class="action-row">
         <button class="act-btn approve" onclick="actReport('${r._key}','approved')">✅ मंजूर</button>
         <button class="act-btn reject"  onclick="actReport('${r._key}','rejected')">❌ अस्वीकार</button>
       </div>`:''}
@@ -7328,6 +7874,7 @@ function viewReportPhoto(el){
     <button class="cancel-btn" onclick="closeModal()">बंद करें</button>`);
 }
 async function actReport(key, status){
+  if(!canManageReports() && !isAdmin()){ toast('❌ Report permission नहीं है'); return; }
   await fbUpdate(`reports/${key}`,{status,actionAt:new Date().toISOString(),actionBy:SESSION.name});
   toast(status==='approved'?'✅ रिपोर्ट मंजूर':'❌ रिपोर्ट अस्वीकार');
   renderAll();
@@ -8053,8 +8600,8 @@ function renderTeam(search=''){
             })()}
             ${isAdmin()?`<div id="devinfo_${e.id}" style="margin-top:6px;font-size:11px;color:var(--muted2)">⏳ device info...</div>`:(isMgr()?`<div id="devinfo_${e.id}" style="margin-top:6px;font-size:11px;color:var(--muted2)">⏳ device info...</div>`:'')}
           </div>
-          ${(isAdmin() || (isMgr() && e.sec!=='MGR'))?`<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
-            <button class="act-btn edit" style="padding:7px 10px;font-size:11px" onclick="openEditEmpForm('${e.id}')">✏️</button>
+          ${(isAdmin() || isMgr())?`<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
+            <button class="act-btn edit" style="padding:7px 10px;font-size:11px" onclick="openEditEmpForm('${e.id}')" title="Edit">✏️</button>
             ${isAdminOrMgr()?`<button class="act-btn del"  style="padding:7px 10px;font-size:11px" onclick="confirmDelEmp('${e.id}','${e.name}')">🗑️</button>`:''}
             <button style="padding:7px 10px;font-size:11px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);border-radius:7px;color:#38bdf8;cursor:pointer" onclick="openDeviceManager('${e.id}','${e.name}')">📱</button>
           </div>`:''}
@@ -9612,7 +10159,16 @@ function openEditEmpForm(empId){
       <select id="ee_woff">${['MON','TUE','WED','THU','FRI','SAT','SUN'].map(d=>`<option${(e.woff||'SUN')===d?' selected':''}>${d}</option>`).join('')}</select>
     </div>
   </div>
-  <div class="field"><label>📱 ${isEn?'Mobile':'मोबाइल नंबर'}</label><input class="inp-field" id="ee_phone" value="${e.phone||''}" placeholder="10-digit" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+  ${(()=>{
+    const lockPhone = isManagerSelfRecord(e);
+    const ph = e.phone||e.mobile||'';
+    if(lockPhone){
+      return `<div class="field"><label>📱 ${isEn?'Mobile (login — locked)':'मोबाइल (लॉगिन — लॉक)'}</label>
+        <input class="inp-field" id="ee_phone" value="${ph}" readonly style="opacity:.85;cursor:not-allowed;background:rgba(148,163,184,.12)">
+        <div style="font-size:11px;color:#fbbf24;margin-top:4px">${isEn?'Manager mobile must match login number and cannot be changed here.':'Manager का मोबाइल लॉगिन नंबर से जुड़ा है — यहाँ नहीं बदल सकते।'}</div></div>`;
+    }
+    return `<div class="field"><label>📱 ${isEn?'Mobile':'मोबाइल नंबर'}</label><input class="inp-field" id="ee_phone" value="${ph}" placeholder="10-digit" type="tel" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'')"></div>`;
+  })()}
   <div class="grid2">
     <div class="field"><label>📅 Joining Date</label><input class="inp-field" id="ee_joining" type="date" value="${e.joiningDate||''}"></div>
     <div class="field"><label>🎂 Date of Birth</label><input class="inp-field" id="ee_dob" type="date" value="${e.dob||''}"></div>
@@ -9622,6 +10178,23 @@ function openEditEmpForm(empId){
     <div class="field"><label>Status</label><select id="ee_status">${statusSel}</select></div>
   </div>
   ${isAdmin()?`<div class="field"><label>Access Level</label><select id="ee_accessLevel"><option value="worker"${(e.accessLevel||'worker')==='worker'?' selected':''}>Worker</option><option value="manager"${e.accessLevel==='manager'?' selected':''}>Manager</option></select></div>`:'<input type="hidden" id="ee_accessLevel" value="'+(e.accessLevel||'worker')+'">'}
+  ${(isMgr()||isAdmin()) && !isManagerSelfRecord(e) ? `
+  <div style="margin:12px 0;padding:12px;border-radius:12px;border:1px solid rgba(168,85,247,.35);background:rgba(168,85,247,.08)">
+    <div style="font-size:12px;font-weight:800;color:#c084fc;margin-bottom:8px">🔐 ${isEn?'Team authorization (delegate)':'टीम अधिकार (सौंपें)'}</div>
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:10px;line-height:1.4">${isEn?'Allow this member to help manage the team:':'इस सदस्य को टीम मैनेज करने की अनुमति दें:'}</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="ee_perm_schedule" ${(e.perms&&e.perms.schedule)?'checked':''} style="width:18px;height:18px;accent-color:#a855f7">
+      📅 ${isEn?'Make / edit shift schedule':'Shift schedule बनाएं / बदलें'}
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="ee_perm_leave" ${(e.perms&&e.perms.leave)?'checked':''} style="width:18px;height:18px;accent-color:#22c55e">
+      🏖️ ${isEn?'Approve / manage leave':'Leave approve / manage'}
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="ee_perm_reports" ${(e.perms&&e.perms.reports)?'checked':''} style="width:18px;height:18px;accent-color:#38bdf8">
+      📋 ${isEn?'Fill / act on reports about members':'Members की reports भरें / देखें'}
+    </label>
+  </div>` : ''}
   <div style="font-size:11px;color:var(--muted2);margin:4px 0 12px">${isEn?'Section updates automatically from Machine.':'Section मशीन से अपने आप अपडेट होगी।'}</div>
   <button class="submit-btn" onclick="saveEmployee('${empId}')">💾 ${isEn?'Save':'सेव करें'}</button>
   <button class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
@@ -9629,10 +10202,14 @@ function openEditEmpForm(empId){
 
 async function saveEmployee(empId){
   const e=getEmps().find(x=>x.id===empId);
-  // Manager cannot edit MGR section employees
-  if(!isAdmin() && e && e.sec==='MGR'){ toast('❌ Manager section की editing सिर्फ Admin कर सकता है'); return; }
+  if(!isAdmin() && !isMgr()){ toast('❌ Only Admin/Manager can edit'); return; }
   const mcVal = document.getElementById('ee_mc').value.trim();
   const desigVal = document.getElementById('ee_designation')?.value||'';
+  let phoneVal = (document.getElementById('ee_phone')?.value||'').trim().replace(/\D/g,'').slice(-10);
+  // Manager cannot change their own login mobile (must match SESSION)
+  if(isManagerSelfRecord(e)){
+    phoneVal = _normMobileKey(SESSION.mobile||SESSION.uid||e.phone||'');
+  }
   const update = {
     name:        document.getElementById('ee_name').value.trim().toUpperCase(),
     empId:       document.getElementById('ee_code').value.trim(),
@@ -9641,12 +10218,20 @@ async function saveEmployee(empId){
     resp:        document.getElementById('ee_resp').value.trim(),
     woff:        document.getElementById('ee_woff').value,
     status:      document.getElementById('ee_status').value,
-    phone:       document.getElementById('ee_phone').value.trim(),
+    phone:       phoneVal,
+    mobile:      phoneVal,
     designation: desigVal,
     accessLevel: document.getElementById('ee_accessLevel')?.value||'worker',
   };
-  // Manager cannot move employee to MGR section
-  if(!isAdmin() && update.sec==='MGR'){ toast('❌ Manager section में सिर्फ Admin जोड़ सकते हैं'); return; }
+  // Team authorization levels (manager assigns to members)
+  if((isMgr()||isAdmin()) && !isManagerSelfRecord(e)){
+    update.perms = {
+      schedule: !!document.getElementById('ee_perm_schedule')?.checked,
+      leave: !!document.getElementById('ee_perm_leave')?.checked,
+      reports: !!document.getElementById('ee_perm_reports')?.checked
+    };
+  }
+  // Allow Admin & Manager to edit all team members including managers
   const joining = document.getElementById('ee_joining')?.value?.trim();
   const dob     = document.getElementById('ee_dob')?.value?.trim();
   const salary  = document.getElementById('ee_salary')?.value?.trim();
@@ -10313,6 +10898,23 @@ async function confirmTeamExcelUpload(){
       };
       if(emp.monthlySalary!=null) update.monthlySalary = emp.monthlySalary;
       if(mgrKey) update.managerId = mgrKey;
+      // Manager's own row: mobile must equal login number (cannot change via Excel)
+      if(isMgr() && isManagerSelfRecord({...emp, phone: emp.phone||emp.mobile, id: emp.id})){
+        update.phone = mgrKey;
+        update.mobile = mgrKey;
+      } else if(isMgr() && _normMobileKey(emp.phone||emp.mobile||'') === mgrKey && emp.id){
+        // Row claiming manager's number for another emp — block later; keep as-is here
+      }
+      // If this row is the manager (matched by empId to self or phone==login), force login mobile
+      const selfMob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+      if(isMgr() && selfMob && (
+        _normMobileKey(emp.phone||'')===selfMob ||
+        (SESSION.empObjId && emp.id===SESSION.empObjId) ||
+        (SESSION.empId && String(emp.empId).toUpperCase()===String(SESSION.empId).toUpperCase())
+      )){
+        update.phone = selfMob;
+        update.mobile = selfMob;
+      }
       if(!emp.existing){
         update.createdAt = new Date().toISOString();
         update.createdBy = SESSION.name || 'manager';
@@ -11801,73 +12403,117 @@ async function saveAllShiftChanges(){
       byEmp[e.empId].push(e);
     }
 
-    // Build list of employees who need WhatsApp
+    // Build notifications: ALWAYS in-app for members; WhatsApp optional
     const waQueue = [];
+    const _waCfg = getShiftConfigSync();
+    const shiftNames = {D:'Day Shift',N:'Night Shift',A:'A Shift',B:'B Shift',C:'C Shift',O:'Weekly Off',L:'Leave',G:'General Shift','C/O':'Comp Off',HLF:'Half Day',Ab:'Absent',H:'Holiday',OD:'Other Dept',GP:'Gate Pass'};
+    const todayFmt = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+    let inAppCount = 0;
+
     for(const [empId, changes] of Object.entries(byEmp)){
       try{
         const emp = getEmps().find(em => em.id === empId);
-        if(!emp || !emp.phone || emp.phone.length !== 10) continue;
+        if(!emp) continue;
         if(emp.id === SESSION.empObjId) continue; // don't notify self
 
-        const shiftNames = {D:'Day Shift (7AM-7PM)', N:'Night Shift (7PM-7AM)', A:'A Shift', B:'B Shift', C:'C Shift', O:'Weekly Off', L:'Leave', G:'General Shift', 'C/O':'Comp Off', HLF:'Half Day', Ab:'Absent', H:'Holiday', OD:'Other Dept', GP:'Gate Pass'};
+        // ── IN-APP notification (always — members see this in the bell) ──
+        try{
+          const changeLines = changes.map(c=>{
+            const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
+            const oldS = c.currentShift || c.oldShift || '—';
+            const newS = c.newShift || '—';
+            return `${fmtD}: ${shiftNames[oldS]||oldS} → ${shiftNames[newS]||newS}`;
+          }).join(' · ');
+          const first = changes[0];
+          const payload = {
+            type: 'shift_change',
+            title: '📋 Shift बदली गई',
+            body: changeLines || 'आपकी shift update हुई',
+            date: first.date,
+            oldShift: first.currentShift || first.oldShift || '',
+            newShift: first.newShift || '',
+            changes: changes.map(c=>({
+              date: c.date,
+              oldShift: c.currentShift||c.oldShift||'',
+              newShift: c.newShift
+            })),
+            changedBy: SESSION.name || 'Manager',
+            read: false,
+            at: new Date().toISOString()
+          };
+          await fbPush('userNotifications/'+emp.id, payload);
+          const mob = _normMobileKey(emp.phone||emp.mobile||'');
+          if(mob && mob !== emp.id){
+            try{ await fbPush('userNotifications/'+mob, payload); }catch(e2){}
+          }
+          inAppCount++;
+        }catch(ne){ console.warn('[in-app notif]', ne); }
+
+        // ── WhatsApp (only if phone + enabled in Shift Settings) ──
+        const phone = (emp.phone||emp.mobile||'').toString().replace(/\D/g,'').slice(-10);
+        if(_waCfg.waNotifyOnSave === false) continue;
+        if(phone.length !== 10) continue;
+
         const allCO = changes.every(c => c.newShift === 'C/O');
         const allAb = changes.every(c => c.newShift === 'Ab');
-        const todayFmt = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-
         let msgLines;
+
         if(allCO){
-          msgLines = `🎁 *GLS Polyfilms — Comp Off Approved*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआपको Compensatory Off मिला है! 🎉\n\n`;
+          msgLines = `🎁 *MET Power — Comp Off*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआपको Compensatory Off मिला है!\n\n`;
           for(const c of changes){
             const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-            msgLines += `🗓️ *C-Off Date:* ${fmtD}\n`;
+            msgLines += `🗓️ *C-Off:* ${fmtD}\n`;
             if(c.coMeta){
               if(c.coMeta.workedDate){
                 const wFmt = new Date(c.coMeta.workedDate).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-                const wDay = ['रवि','सोम','मंगल','बुध','गुरु','शुक्र','शनि'][new Date(c.coMeta.workedDate).getDay()];
-                msgLines += `💼 *जिस दिन काम किया:* ${wFmt} (${wDay})\n`;
+                msgLines += `💼 काम किया: ${wFmt}\n`;
               }
-              if(c.coMeta.holiName) msgLines += `🎉 *अवसर:* ${c.coMeta.holiName}\n`;
-              if(c.coMeta.reason)   msgLines += `📝 *कारण:* ${c.coMeta.reason}\n`;
+              if(c.coMeta.reason) msgLines += `📝 ${c.coMeta.reason}\n`;
             }
             msgLines += '\n';
           }
-          msgLines += `कोई सवाल हो तो Supervisor से मिलें।\n_— MET Power System_`;
+          msgLines += `_— ${SESSION.name||'Manager'}_`;
         } else if(allAb){
-          msgLines = `⚠️ *GLS Polyfilms — अनुपस्थिति सूचना*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\n`;
-          msgLines += `आप बिना अनुमति के अनुपस्थित पाए गए हैं:\n\n`;
+          msgLines = `⚠️ *MET Power — अनुपस्थिति*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआप बिना अनुमति अनुपस्थित चिह्नित किए गए:\n\n`;
           for(const c of changes){
             const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-            const dayName = ['रविवार','सोमवार','मंगलवार','बुधवार','गुरुवार','शुक्रवार','शनिवार'][new Date(c.date).getDay()];
-            msgLines += `🗓️ *${fmtD}* (${dayName})\n`;
+            msgLines += `• ${fmtD}\n`;
           }
-          msgLines += `\n🚨 *यह अनुशासनहीनता है।*\nकृपया तुरंत अपने Supervisor को कारण बताएं।\nबार-बार अनुपस्थिति पर कार्रवाई की जाएगी।\n\n_— MET Power System_`;
+          msgLines += `\n_— ${SESSION.name||'Manager'}_`;
           for(const c of changes){
             try{
               const abKey = await fbPush('reports', {
                 type: 'absent', empId: emp.id, empName: emp.name,
-                aboutName: emp.name, section: emp.sec||'M1', date: c.date,
-                description: `${emp.name} बिना अनुमति अनुपस्थित — दिनांक: ${new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'})}`,
-                reportedByName: SESSION.name||'Admin', reportedById: SESSION.empObjId||'',
+                aboutName: emp.name, section: emp.sec||'', date: c.date,
+                description: `${emp.name} बिना अनुमति अनुपस्थित — ${new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short'})}`,
+                reportedByName: SESSION.name||'Manager', reportedById: SESSION.empObjId||'',
                 status: 'approved', autoGenerated: true, createdAt: new Date().toISOString()
               });
-              // Write _key back so Admin/Manager can delete it
               await fbUpdate('reports/'+abKey, {_key: abKey});
-            }catch(re){ console.warn('[Auto absent report] error:', re); }
+            }catch(re){ console.warn('[Auto absent report]', re); }
           }
         } else {
-          msgLines = `🔔 *GLS Polyfilms — Shift Update*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआपकी shift में बदलाव हुआ है:\n`;
+          let changeLines = '';
           for(const c of changes){
             const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-            msgLines += `• ${fmtD}: *${shiftNames[c.newShift]||c.newShift}*\n`;
+            const oldL = shiftNames[c.currentShift]||c.currentShift||'—';
+            const newL = shiftNames[c.newShift]||c.newShift;
+            changeLines += `• ${fmtD}: ${oldL} → *${newL}*\n`;
           }
-          msgLines += `\nकोई सवाल हो तो Supervisor से मिलें।\n_— MET Power System_`;
+          const tpl = (_waCfg.waShiftTemplate || (typeof getDefaultShiftConfig==='function' && getDefaultShiftConfig().waShiftTemplate) || '')
+            .replace(/\{name\}/g, emp.name||'')
+            .replace(/\{manager\}/g, SESSION.name||'Manager')
+            .replace(/\{date\}/g, todayFmt)
+            .replace(/\{changes\}/g, changeLines.trim());
+          msgLines = tpl || (`🔔 *Shift Update*\n\n${emp.name}\n${changeLines}`);
         }
 
-        waQueue.push({ emp, msgLines, changes });
+        waQueue.push({ emp: {...emp, phone}, msgLines, changes });
+      }catch(ne){ console.warn('notify error:', ne); }
+    }
 
-        // In-app notification
-        await pushShiftNotification(emp.id, emp.name, changes[0].date, changes[0].oldShift||'?', changes[0].newShift, SESSION.name);
-      }catch(ne){ console.warn('WA notify error:', ne); }
+    if(inAppCount){
+      toast(`🔔 ${inAppCount} सदस्य को app notification भेजी`);
     }
 
     // ── Sequential WhatsApp sender ──
@@ -12103,10 +12749,18 @@ function editShiftCell(empId, empName, date, currentShift){
     'C/O':{bg:'#713f12',color:'#fde68a'}, H:{bg:'#ea580c',color:'#fff'}, OD:{bg:'#0d9488',color:'#ccfbf1'},
     GP:{bg:'#6d28d9',color:'#e9d5ff'}, HLF:{bg:'#f97316',color:'#fff'}, Ab:{bg:'#450a0a',color:'#fca5a5'}
   };
-  // Always offer D,N,A,B,C for every manager; merge timing labels from config
-  const _stdCodes = ['D','N','A','B','C'];
+  // Offer only active work shifts (D/N/A/B/C); hide if inactive or profile hide flags
   const _cfgByCode = {};
   (_cfg.shifts||[]).forEach(s=>{ if(s&&s.code) _cfgByCode[String(s.code).toUpperCase()]=s; });
+  const _stdCodes = ['D','N','A','B','C'].filter(code=>{
+    const s = _cfgByCode[code];
+    if(s && s.active === false) return false;
+    if(_cfg.hideSummaryDN && (code==='D'||code==='N')) return false;
+    if(_cfg.hideSummaryABC && (code==='A'||code==='B'||code==='C')) return false;
+    // Default: if no config entry, show D/N only
+    if(!s) return code==='D' || code==='N';
+    return s.active !== false;
+  });
   const SHIFT_OPTIONS = [
     ..._stdCodes.map(code=>{
       const s=_cfgByCode[code]||{code,label:code};
@@ -13559,7 +14213,16 @@ async function _execPrint(){
   }).join('');
 
   // Legend
-  const LI=[{bg:'#f59e0b',c:'#000',t:'D = Day'},{bg:'#4f46e5',c:'#fff',t:'N = Night'},{bg:'#16a34a',c:'#fff',t:'A = A Shift'},{bg:'#db2777',c:'#fff',t:'B = B Shift'},{bg:'#0891b2',c:'#fff',t:'C = C Shift'},{bg:'#dcfce7',c:'#16a34a',t:'O = Weekly Off'},{bg:'#fee2e2',c:'#dc2626',t:'L = Leave'},{bg:'#ede9fe',c:'#7c3aed',t:'C/O = Comp Off'},{bg:'#e0f2fe',c:'#0369a1',t:'G = General'},{bg:'#ffedd5',c:'#c2410c',t:'H = Holiday'},{bg:'#ccfbf1',c:'#0d9488',t:'OD = Other Dept'},{bg:'#ede9fe',c:'#6d28d9',t:'GP = Gate Pass'},{bg:'#fed7aa',c:'#c2410c',t:'½ = Half Day'},{bg:'#fecaca',c:'#991b1b',t:'Ab = Absent'}];
+  const _pcfg = (typeof getShiftConfigSync==='function') ? getShiftConfigSync() : {};
+  let LI=[{bg:'#f59e0b',c:'#000',t:'D = Day',code:'D'},{bg:'#4f46e5',c:'#fff',t:'N = Night',code:'N'},{bg:'#16a34a',c:'#fff',t:'A = A Shift',code:'A'},{bg:'#db2777',c:'#fff',t:'B = B Shift',code:'B'},{bg:'#0891b2',c:'#fff',t:'C = C Shift',code:'C'},{bg:'#dcfce7',c:'#16a34a',t:'O = Weekly Off'},{bg:'#fee2e2',c:'#dc2626',t:'L = Leave'},{bg:'#ede9fe',c:'#7c3aed',t:'C/O = Comp Off'},{bg:'#e0f2fe',c:'#0369a1',t:'G = General'},{bg:'#ffedd5',c:'#c2410c',t:'H = Holiday'},{bg:'#ccfbf1',c:'#0d9488',t:'OD = Other Dept'},{bg:'#ede9fe',c:'#6d28d9',t:'GP = Gate Pass'},{bg:'#fed7aa',c:'#c2410c',t:'½ = Half Day'},{bg:'#fecaca',c:'#991b1b',t:'Ab = Absent'}];
+  LI = LI.filter(i=>{
+    if(!i.code) return true;
+    if(_pcfg.hideSummaryDN && (i.code==='D'||i.code==='N')) return false;
+    if(_pcfg.hideSummaryABC && (i.code==='A'||i.code==='B'||i.code==='C')) return false;
+    const sh = (_pcfg.shifts||[]).find(s=>String(s.code).toUpperCase()===i.code);
+    if(sh && sh.active===false) return false;
+    return true;
+  });
   const legendHtml=LI.map(i=>`<span style="display:inline-flex;align-items:center;gap:3px">
     <span style="display:inline-block;width:19px;height:15px;background:${i.bg};color:${i.c};border-radius:2px;font-weight:900;font-size:9px;text-align:center;line-height:15px;border:1px solid rgba(0,0,0,.2)">${i.t.split(' ')[0]}</span>
     <span style="color:#444;font-size:9px">${i.t.split('= ')[1]}</span>
@@ -13644,9 +14307,8 @@ async function _execPrint(){
 // EXCEL EXPORT — Shift Schedule
 // ════════════════════════════════════════
 function exportSchedExcel(){
-  if(!isAdminOrMgr()){ toast('❌ सिर्फ Admin/Manager export कर सकते हैं'); return; }
+  if(!isAdminOrMgr()){ toast('❌ Only Admin/Manager can export'); return; }
 
-  // Build date list (same as renderSchedule)
   let dates;
   if(_customRangeActive && _customDateFrom && _customDateTo){
     const d=new Date(_customDateFrom), e2=new Date(_customDateTo);
@@ -13656,125 +14318,83 @@ function exportSchedExcel(){
     dates=Array.from({length:15},(_,i)=>addDays(TODAY_STR,schedOff+i));
   }
 
-  const allEmps = getEmps().filter(e=>e.status!=='resigned');
-
-  // Section groups for Excel sheet structure
-  const GROUPS = [
-    { label:'⭐ METALLISER — MAIN OPERATORS',  filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='main' },
-    { label:'🔄 METALLISER — RELIEVERS',       filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='reliever' },
-    { label:'🏭 METALLISER — TEAM',            filter:e=>['M1','M2'].includes(e.sec)&&getEmpRole(e).role==='assist' },
-    { label:'⭐ SLITTER — MAIN OPERATORS',     filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='main' },
-    { label:'🔄 SLITTER — RELIEVERS',          filter:e=>['S1','S2'].includes(e.sec)&&getEmpRole(e).role==='slit_rel' },
-    { label:'✂️ SLITTER — TEAM',               filter:e=>['S1','S2'].includes(e.sec)&&!['main','slit_rel'].includes(getEmpRole(e).role) },
-    { label:'👷 SUPERVISORS / ENGINEERS',                   filter:e=>e.sec==='SUP' },
-    { label:'🎯 MANAGER',                       filter:e=>e.sec==='MGR' },
-  ].filter(g=>allEmps.some(g.filter));
-
-  // Day names
+  const allEmps = getEmps().filter(e=>e.status!=='resigned' && e.status!=='left');
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const lbl = (document.getElementById('schedLbl')||{}).textContent || '';
 
-  // Build CSV rows
+  // Same fixed columns as Team Excel upload template
+  const FIXED = [
+    'Name','Emp ID','Designation','Weekly Off','Mobile',
+    'Joining Date','Date of Birth','Machine','Responsibility','Salary (₹/month)'
+  ];
+
   const rows = [];
-  const lbl = document.getElementById('schedLbl').textContent;
-  rows.push([`GLS Polyfilms — Shift Schedule: ${lbl}`]);
-  rows.push([`Generated: ${new Date().toLocaleString('en-IN')}`]);
-  rows.push([]); // blank row
+  rows.push(['GLS Polyfilms / MET Power — Schedule + Team export']);
+  rows.push(['Range: ' + lbl, 'Generated: ' + new Date().toLocaleString('en-IN')]);
+  rows.push([]);
 
-  // Fixed columns: Name | Emp ID | Designation
-  const FIXED_COLS = ['Name', 'Emp ID', 'Designation'];
-  const SUMMARY_COLS = ['D','N','O','L','G','C/O','HLF','Ab'];
-
-  // ROW 1 of header: Date numbers (e.g. 1/4, 2/4 ...)
-  const dateNumRow = [...FIXED_COLS, ...dates.map(d=>{
+  // Header row 1: fixed cols + date numbers
+  const headerDates = dates.map(d=>{
     const dt = new Date(d+'T00:00:00');
-    return `${dt.getDate()}/${dt.getMonth()+1}`;
-  }), ...SUMMARY_COLS];
+    return `${String(dt.getDate()).padStart(2,'0')}-${dt.toLocaleString('en',{month:'short'})}-${String(dt.getFullYear()).slice(2)}`;
+  });
+  rows.push([...FIXED, ...headerDates]);
 
-  // ROW 2 of header: Weekday names (e.g. Wed, Thu ...)
-  const dayNameRow = ['', '', '', ...dates.map(d=>{
+  // Header row 2: blanks for fixed + weekdays
+  rows.push([...FIXED.map(()=>''), ...dates.map(d=>{
     const dt = new Date(d+'T00:00:00');
     return dayNames[dt.getDay()];
-  }), ...SUMMARY_COLS.map(()=>'')];
+  })]);
 
-  rows.push(dateNumRow);
-  rows.push(dayNameRow);
-
-  GROUPS.forEach(grp => {
-    const members = allEmps.filter(grp.filter).sort((a,b)=>getEmpDisplayOrder(a)-getEmpDisplayOrder(b));
-    if(!members.length) return;
-    // Section label row
-    rows.push([grp.label]);
-    members.forEach(emp => {
-      // Use emp.empId (real employee code like 30000197), not emp.id (Firebase key)
-      const empCode = emp.empId || emp.id || '';
-      const desig   = emp.designation || '';
-      const row = [emp.name, empCode, desig];
-      const counts = {D:0,N:0,O:0,L:0,G:0,'C/O':0,HLF:0,Ab:0};
-      dates.forEach(d => {
-        const sh = getShift(emp, d) || 'O';
-        row.push(sh);
-        const norm = sh==='CO'?'C/O':sh;
-        if(counts[norm]!==undefined) counts[norm]++;
-      });
-      row.push(counts.D, counts.N, counts.O, counts.L, counts.G, counts['C/O'], counts.HLF, counts.Ab);
-      rows.push(row);
-    });
-    rows.push([]); // blank between sections
+  const sorted = allEmps.slice().sort((a,b)=>{
+    const sa = (a.sec||'').toString();
+    const sb = (b.sec||'').toString();
+    if(sa!==sb) return sa.localeCompare(sb);
+    return (a.name||'').localeCompare(b.name||'');
   });
 
-  // Convert to CSV string
-  const csvContent = rows.map(row =>
-    row.map(cell => {
-      const s = String(cell===undefined||cell===null?'':cell);
-      // Escape double quotes, wrap in quotes if comma/newline present
-      if(s.includes(',') || s.includes('"') || s.includes('\n'))
-        return '"' + s.replace(/"/g,'""') + '"';
-      return s;
-    }).join(',')
-  ).join('\r\n');
+  sorted.forEach(e=>{
+    const mobile = (e.phone||e.mobile||'').toString().replace(/\D/g,'').slice(-10);
+    const machine = e.machine || e.mc || e.sec || '';
+    const desig = e.designation || e.desig || '';
+    const resp = e.responsibility || e.resp || '';
+    const salary = e.monthlySalary != null && e.monthlySalary !== '' ? e.monthlySalary : '';
+    const shifts = dates.map(d => {
+      try{ return getShift(e, d) || ''; }catch(err){ return ''; }
+    });
+    rows.push([
+      e.name||'',
+      e.empId||'',
+      desig,
+      e.woff||'',
+      mobile,
+      e.joiningDate||'',
+      e.dob||'',
+      machine,
+      resp,
+      salary,
+      ...shifts
+    ]);
+  });
 
-  // BOM for Excel UTF-8 recognition
-  const bom = '\uFEFF';
-  const blob = new Blob([bom + csvContent], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
+  // CSV escape
+  const esc = (v) => {
+    const s = (v==null?'':String(v));
+    if(/[",\n\r]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+    return s;
+  };
+  const csv = rows.map(r => r.map(esc).join(',')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
-  const safeLbl = lbl.replace(/[^a-zA-Z0-9]/g,'_');
-  a.href = url;
-  a.download = `GLS_Schedule_${safeLbl}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.download = 'MET-Power-Schedule-'+ (dates[0]||'export') + '-to-' + (dates[dates.length-1]||'') + '.csv';
   document.body.appendChild(a);
   a.click();
-  setTimeout(()=>{ URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
-  toast('✅ Excel (CSV) file download हो गई!');
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  toast('✅ Excel/CSV downloaded (' + sorted.length + ' members)');
 }
 
-// ════════════════════════════════════════
-// LEARN SECTION — Per Category Pricing
-// ════════════════════════════════════════
-let _selectedPlan = null;
-let _learnContentFilter = 'all';
 
-const RAZORPAY_KEY = 'rzp_test_YourKeyHere'; // Replace with your Razorpay key
-
-const PLAN_INFO = {
-  // GLS Training — FREE for GLS Employees
-  gls_free:        { name:'GLS Training',      icon:'🏭', price:0,   color:'#22c55e' },
-  // Paid Plans — Basic & Advanced per category
-  supervisor_basic:    { name:'Supervisory Skills Basic',    icon:'👔', price:49,  color:'#fbbf24' },
-  supervisor_advanced: { name:'Supervisory Skills Advanced', icon:'👔', price:199, color:'#f59e0b' },
-  managerial_basic:    { name:'Managerial Skills Basic',     icon:'📊', price:49,  color:'#a855f7' },
-  managerial_advanced: { name:'Managerial Skills Advanced',  icon:'📊', price:199, color:'#9333ea' },
-  msoffice_basic:      { name:'MS Office Basic',             icon:'💻', price:49,  color:'#38bdf8' },
-  msoffice_advanced:   { name:'MS Office Advanced',          icon:'💻', price:199, color:'#0284c7' },
-  // Legacy (keep for backward compat)
-  met_operation:   { name:'Met Operation',   icon:'🏭', price:399, color:'var(--m1)' },
-  met_maintenance: { name:'Met Maintenance', icon:'🔧', price:399, color:'var(--s1)' },
-  ms_office:       { name:'MS Office',       icon:'💻', price:399, color:'var(--sup)' },
-  supervisor:      { name:'Advanced Supervisor',icon:'👔', price:399, color:'#a3e635' },
-  managerial:      { name:'Managerial Skills',icon:'📊',price:499, color:'#a855f7' },
-  combo:           { name:'All Access Combo',icon:'🎯', price:999, color:'var(--m1)' },
-};
-
-// Get live price for a plan (Firebase override > default)
 function getPrice(plan){
   const fp = (_cache.learnPrices||{})[plan];
   if(fp && typeof fp.price === 'number') return fp.price;
@@ -18054,15 +18674,31 @@ let _userNotifUnread = 0;
 
 function listenUserShiftNotifications(){
   const empId = SESSION.empObjId;
-  if(!empId) return;
-  
-  fbListen('userNotifications/'+empId, v => {
-    const items = v ? Object.entries(v).map(([k,n])=>({...n,_key:k})) : [];
-    items.sort((a,b)=> new Date(b.at||0) - new Date(a.at||0));
-    _userNotifCache = items;
-    _userNotifUnread = items.filter(n=>!n.read).length;
+  const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  if(!empId && !mob) return;
+
+  const mergeNotifs = (v, prefix) => {
+    const items = v ? Object.entries(v).map(([k,n])=>({...n,_key:k,_path:prefix})) : [];
+    // Merge with existing cache from other path (dedupe by at+title+body)
+    const prev = _userNotifCache || [];
+    const map = new Map();
+    [...prev, ...items].forEach(n=>{
+      const key = (n.at||'')+'|'+(n.title||'')+'|'+(n.body||'');
+      if(!map.has(key)) map.set(key, n);
+    });
+    const merged = [...map.values()].sort((a,b)=> new Date(b.at||0) - new Date(a.at||0));
+    _userNotifCache = merged;
+    _userNotifUnread = merged.filter(n=>!n.read).length;
     _updateUserNotifBadge();
-  });
+  };
+
+  if(empId){
+    fbListen('userNotifications/'+empId, v => mergeNotifs(v, empId));
+  }
+  // Also listen by mobile key (fallback when empObjId missing at write time)
+  if(mob && mob !== empId){
+    fbListen('userNotifications/'+mob, v => mergeNotifs(v, mob));
+  }
 }
 
 function _updateUserNotifBadge(){
@@ -18156,8 +18792,8 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
     const fmtD = new Date(date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
     const shiftNames = {D:'Day',N:'Night',A:'A',B:'B',C:'C',O:'Off',L:'Leave',G:'General','C/O':'C-Off',CO:'C-Off',HLF:'Half Day',Ab:'Absent',GP:'Gate Pass',H:'Holiday',OD:'Other Dept'};
     const body = `${fmtD} को आपकी shift ${shiftNames[oldShift]||oldShift} से ${shiftNames[newShift]||newShift} में बदली गई`;
-    
-    await fbPush('userNotifications/'+empObjId, {
+    const payload = {
+      type: 'shift_change',
       title: '📋 Shift बदली गई',
       body,
       date,
@@ -18166,7 +18802,14 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
       changedBy: changedBy || SESSION.name || 'Admin',
       read: false,
       at: new Date().toISOString()
-    });
+    };
+    if(empObjId) await fbPush('userNotifications/'+empObjId, payload);
+    // Also by phone so mobile-login members receive it
+    try{
+      const emp = getEmps().find(e=>e.id===empObjId);
+      const mob = _normMobileKey(emp && (emp.phone||emp.mobile));
+      if(mob && mob !== empObjId) await fbPush('userNotifications/'+mob, payload);
+    }catch(e2){}
   }catch(e){ console.warn('[pushShiftNotif] error:', e.message); }
 }
 

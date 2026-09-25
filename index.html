@@ -138,7 +138,7 @@ window.addEventListener('appinstalled', function () {
     <div style="font-size:12px;color:#64748b;margin-bottom:18px">Team Management Platform</div>
     <div class="login-card" style="width:100%">
       <div class="err-msg" id="loginErr"></div>
-      <div style="font-size:13px;font-weight:700;color:var(--muted2);margin-bottom:8px">&#128241; Mobile Number</div>
+      <div style="font-size:14px;font-weight:800;color:#e2e8f0;margin-bottom:8px">&#128241; Mobile Number</div>
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <div style="background:#1e293b;border:1.5px solid var(--border2);border-radius:10px;padding:12px 10px;font-size:15px;font-weight:700;color:#94a3b8;white-space:nowrap">+91</div>
         <input class="inp-field" type="tel" id="loginMobile" placeholder="10 अंकों का Mobile"
@@ -162,7 +162,7 @@ window.addEventListener('appinstalled', function () {
       <div style="text-align:center;margin-bottom:16px">
         <div style="font-size:38px;margin-bottom:6px">&#128172;</div>
         <div style="font-size:16px;font-weight:900;color:#fff">OTP डालें</div>
-        <div style="font-size:12px;color:#64748b;margin-top:4px" id="otpSentTo">OTP भेजा गया</div>
+        <div style="font-size:13px;color:#e2e8f0;font-weight:600;margin-top:4px" id="otpSentTo">OTP भेजा गया</div>
       </div>
       <div class="err-msg" id="loginErr2"></div>
       <input class="inp-field" type="tel" id="otpInput" placeholder="- - - - - -"
@@ -172,7 +172,7 @@ window.addEventListener('appinstalled', function () {
         style="font-size:28px;letter-spacing:10px;text-align:center;margin-bottom:12px">
       <button class="big-btn" id="verifyOtpBtn" onclick="_verifyOTP()" disabled style="opacity:.5">Verify &#10003;</button>
       <div style="text-align:center;margin-top:10px">
-        <span id="otpResendTimer" style="font-size:12px;color:#64748b"></span>
+        <span id="otpResendTimer" style="font-size:13px;color:#cbd5e1;font-weight:600"></span>
         <span id="otpResendBtn" onclick="_sendOTP(true)" style="font-size:12px;color:var(--m1);font-weight:700;cursor:pointer;display:none">OTP फिर भेजें &#8635;</span>
       </div>
       <button class="back-btn" onclick="backToStep1()">&larr; वापस</button>
