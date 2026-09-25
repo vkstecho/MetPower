@@ -3489,21 +3489,158 @@ function showLoginErr(msg){
 async function _syncAuthRoleNodes(){
   try{
     const auth = window._fbAuth;
-    if(!auth || !auth.currentUser) return;
+    if(!auth || !auth.currentUser) return false;
     const uid = auth.currentUser.uid;
-    if(!uid) return;
+    if(!uid) return false;
     const phone = (auth.currentUser.phoneNumber || '').replace(/\s/g,'');
     const hardAdminPhones = ['+918929397949','+918929394920'];
     const isHardAdmin = hardAdminPhones.includes(phone);
-    // Admin session or hardcoded admin phone → admins/{uid}
     if(SESSION.role === 'admin' || isHardAdmin){
       try{ await fbSet('admins/'+uid, true); }catch(e){ console.warn('[roleSync] admins write:', e.message); }
     }
-    // Manager (SESSION or approved mobileUsers) → managers/{uid}
-    if(SESSION.role === 'manager' || isMgr()){
+    if(SESSION.role === 'manager' || isMgr() || isHardAdmin){
       try{ await fbSet('managers/'+uid, true); }catch(e){ console.warn('[roleSync] managers write:', e.message); }
     }
-  }catch(e){ console.warn('[roleSync]', e.message); }
+    return true;
+  }catch(e){ console.warn('[roleSync]', e.message); return false; }
+}
+
+/** True if Firebase Auth can satisfy RTDB write rules (phone OTP user or elevated node). */
+function _hasElevatedFirebaseAuth(){
+  try{
+    const u = window._fbAuth && window._fbAuth.currentUser;
+    if(!u) return false;
+    // Anonymous has no phoneNumber — cannot write overrides under current rules
+    if(u.isAnonymous) return false;
+    if(u.phoneNumber) return true;
+    // Custom-token admin might lack phone but have providers
+    if(SESSION.role === 'admin' && u.uid) return true;
+    return false;
+  }catch(e){ return false; }
+}
+
+/**
+ * Ensure write-capable auth before schedule save.
+ * If only anonymous session, open quick Phone OTP (no full logout) then retry.
+ * @returns {Promise<boolean>}
+ */
+async function _ensureWriteAuth(){
+  if(_hasElevatedFirebaseAuth()){
+    await _syncAuthRoleNodes();
+    return true;
+  }
+  // Manager/member with known mobile → in-place OTP, keep app session
+  const mob = _normMobileKey(SESSION.mobile || SESSION.uid || '');
+  if((isMgr() || SESSION.role === 'manager' || SESSION.role === 'admin') && mob && mob.length === 10){
+    return await _openQuickPhoneReauth(mob);
+  }
+  // Admin without phone in session — still try role sync
+  if(SESSION.role === 'admin'){
+    await _syncAuthRoleNodes();
+    return _hasElevatedFirebaseAuth();
+  }
+  return false;
+}
+
+let _reauthConfirm = null;
+let _reauthResolve = null;
+
+/** Modal: verify phone OTP without logging out of the app. */
+function _openQuickPhoneReauth(mobile10){
+  return new Promise((resolve)=>{
+    _reauthResolve = resolve;
+    _reauthConfirm = null;
+    const existing = document.getElementById('quickReauthOverlay');
+    if(existing) existing.remove();
+
+    const ov = document.createElement('div');
+    ov.id = 'quickReauthOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.75);display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(4px)';
+    ov.innerHTML = `
+      <div style="background:var(--bg2,#0d1623);border-radius:20px 20px 0 0;padding:22px 18px 36px;width:100%;max-width:480px;border-top:1px solid var(--border2,#334155)">
+        <div style="width:36px;height:4px;background:#475569;border-radius:2px;margin:0 auto 14px"></div>
+        <div style="font-size:17px;font-weight:900;color:#fff;margin-bottom:6px">🔐 Phone verify (one time)</div>
+        <div style="font-size:13px;color:#94a3b8;line-height:1.5;margin-bottom:14px">
+          Schedule save के लिए Firebase Phone OTP चाहिए। <b style="color:#e2e8f0">Logout नहीं</b> करना — सिर्फ OTP verify करें। Session वही रहेगा।
+        </div>
+        <div style="font-size:12px;color:#7dd3fc;margin-bottom:10px">📱 +91 ${mobile10}</div>
+        <div id="reauthRecaptcha" style="min-height:1px"></div>
+        <button type="button" id="reauthSendBtn" onclick="_reauthSendOtp('${mobile10}')"
+          style="width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;font-weight:900;font-size:15px;cursor:pointer;margin-bottom:10px">
+          OTP भेजें
+        </button>
+        <input id="reauthOtpInput" type="tel" inputmode="numeric" maxlength="6" autocomplete="one-time-code" name="one-time-code"
+          placeholder="6-digit OTP" style="display:none;width:100%;box-sizing:border-box;padding:14px;border-radius:12px;border:1.5px solid #60a5fa;background:#1e3251;color:#fff;font-size:22px;letter-spacing:8px;text-align:center;margin-bottom:10px">
+        <button type="button" id="reauthVerifyBtn" onclick="_reauthVerifyOtp()" style="display:none;width:100%;padding:14px;border:none;border-radius:12px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:900;font-size:15px;cursor:pointer;margin-bottom:8px">
+          Verify &amp; Save
+        </button>
+        <button type="button" onclick="_reauthCancel()" style="width:100%;padding:12px;border:1px solid #475569;border-radius:12px;background:transparent;color:#94a3b8;font-weight:700;cursor:pointer">
+          Cancel
+        </button>
+        <div id="reauthErr" style="color:#fca5a5;font-size:12px;margin-top:8px;min-height:16px"></div>
+      </div>`;
+    document.body.appendChild(ov);
+  });
+}
+
+async function _reauthSendOtp(mobile10){
+  const err = document.getElementById('reauthErr');
+  const btn = document.getElementById('reauthSendBtn');
+  if(err) err.textContent = '';
+  try{
+    if(btn){ btn.disabled = true; btn.textContent = '⏳ Sending…'; }
+    // Sign out anonymous so phone auth can take over
+    try{
+      if(window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.isAnonymous && window._fbSignOut){
+        await window._fbSignOut();
+      }
+    }catch(e){}
+    _reauthConfirm = await _fbSendPhoneOtp('+91'+mobile10, 'reauthRecaptcha', '_fbRecaptchaReauth');
+    const inp = document.getElementById('reauthOtpInput');
+    const vbtn = document.getElementById('reauthVerifyBtn');
+    if(inp){ inp.style.display = 'block'; inp.focus(); }
+    if(vbtn) vbtn.style.display = 'block';
+    if(btn){ btn.textContent = 'OTP फिर भेजें'; btn.disabled = false; }
+    toast('✅ OTP भेज दिया');
+    if(typeof _startWebOtpListen === 'function'){
+      _startWebOtpListen('reauthOtpInput', code=>{
+        if(code && code.length===6) setTimeout(()=>_reauthVerifyOtp(), 200);
+      });
+    }
+  }catch(e){
+    if(err) err.textContent = '❌ '+(_fbOtpErrorMessage?_fbOtpErrorMessage(e):(e.message||e));
+    if(btn){ btn.disabled = false; btn.textContent = 'OTP भेजें'; }
+  }
+}
+
+async function _reauthVerifyOtp(){
+  const err = document.getElementById('reauthErr');
+  const code = (document.getElementById('reauthOtpInput')?.value||'').replace(/\D/g,'').slice(0,6);
+  if(code.length!==6){ if(err) err.textContent='⚠️ 6 अंक OTP डालें'; return; }
+  if(!_reauthConfirm){ if(err) err.textContent='⚠️ पहले OTP भेजें'; return; }
+  try{
+    if(err) err.textContent = '⏳ Verify…';
+    await _fbVerifyPhoneOtp(_reauthConfirm, code);
+    _reauthConfirm = null;
+    await _syncAuthRoleNodes();
+    toast('✅ Phone verified — अब Save कर सकते हैं');
+    const ov = document.getElementById('quickReauthOverlay');
+    if(ov) ov.remove();
+    const r = _reauthResolve;
+    _reauthResolve = null;
+    if(r) r(true);
+  }catch(e){
+    if(err) err.textContent = '❌ '+(_fbOtpErrorMessage?_fbOtpErrorMessage(e):(e.message||e));
+  }
+}
+
+function _reauthCancel(){
+  try{ if(typeof _stopWebOtpListen==='function') _stopWebOtpListen(); }catch(e){}
+  const ov = document.getElementById('quickReauthOverlay');
+  if(ov) ov.remove();
+  const r = _reauthResolve;
+  _reauthResolve = null;
+  if(r) r(false);
 }
 
 async function launchApp(){
@@ -4944,6 +5081,28 @@ function getShift(emp, dateStr){
   return '';
 }
 function cellClass(s){ if(!s) return 'blank'; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'HLF','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||'O'; }
+
+/** Show full employee name when schedule column truncates on small screens */
+function showEmpNameFull(name, empId, sec){
+  const n = name || '—';
+  const id = empId || '';
+  const s = sec || '';
+  // Prefer a small non-blocking toast + optional modal for very long names
+  toast('👤 ' + n + (id ? ' · ' + id : ''));
+  try{
+    if(String(n).length > 18 || /[\u0900-\u097F]/.test(n)){
+      openModal(`<div class="modal-handle"></div>
+        <div class="modal-title">👤 Employee</div>
+        <div style="padding:8px 4px 4px">
+          <div style="font-size:20px;font-weight:900;color:var(--text);line-height:1.35;word-break:break-word">${String(n).replace(/</g,'&lt;')}</div>
+          ${id?`<div style="font-size:14px;color:var(--muted2);margin-top:8px">ID: <b style="color:var(--text)">${String(id).replace(/</g,'&lt;')}</b></div>`:''}
+          ${s?`<div style="font-size:13px;color:var(--muted2);margin-top:4px">Section: ${String(s).replace(/</g,'&lt;')}</div>`:''}
+        </div>
+        <button class="cancel-btn" style="margin-top:14px" onclick="closeModal()">बंद करें</button>`);
+    }
+  }catch(e){}
+}
+
 function cellDisp(s){  if(!s) return ''; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'½','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||s||''; }
 function getShiftTimingStripHtml(){
   const cfg=getShiftConfigSync();
@@ -6441,11 +6600,12 @@ function renderSchedule(){
       const role=getEmpRole(emp);
       const isMain=role.role==='main';
       tbody+=`<tr class="${isMe?'my-row':''}${isMain?' main-op-row':''}">
-        <td class="ecol">
+        <td class="ecol" title="${String(emp.name||'').replace(/"/g,'&quot;')} · ${emp.empId||''}"
+          onclick="event.stopPropagation();showEmpNameFull('${String(emp.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}','${String(emp.empId||'').replace(/'/g,"\\'")}','${String(emp.sec||emp.mc||'').replace(/'/g,"\\'")}')">
           <div class="emp-nm" style="${isMain?'font-weight:900;':''}">
             ${isMain?'⭐ ':''}${emp.name}${isMe?' <span style="font-size:9px;color:var(--m1);background:var(--m1bg);padding:1px 4px;border-radius:3px">आप</span>':''}
           </div>
-          <div class="emp-id">${emp.empId||emp.resp}</div>
+          <div class="emp-id">${emp.empId||emp.resp||''}</div>
         </td>
         ${dates.map(d=>{
           const pendingKey = emp.id+'__'+d;
@@ -10959,6 +11119,29 @@ function closeTeamExcelUpload(){
   document.getElementById('teamExcelOverlay').classList.remove('open');
 }
 
+
+/** Download sample Team Excel matching Manager snapshot format */
+function downloadTeamExcelTemplate(){
+  const headers = ['Name','Emp ID','Designation','Weekly Off','Mobile','Joining Date','Date of Birth','Machine','Responsibility','Salary'];
+  const sample = [
+    ['DINESH','50000555','Team Member','TUE','9695887766','23-09-2024','01-01-1994','M-1','Operation','25000'],
+    ['SURAJ','50000556','Team Member','WED','7408920675','01-09-2025','01-01-1994','M-1','Operation','48000'],
+  ];
+  const esc = v => {
+    const s = String(v??'');
+    return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const csv = [headers, ...sample].map(r=>r.map(esc).join(',')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'MET_Team_Upload_Template.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  toast('⬇️ Template downloaded — Excel में खोलकर Save as .xlsx भी कर सकते हैं');
+}
+
 async function handleTeamExcelFile(file){
   if(!file) return;
   const preview=document.getElementById('teamExcelPreview');
@@ -12958,6 +13141,15 @@ function discardAllShiftChanges(){
   toast('🗑️ सभी बदलाव रद्द किए गए');
 }
 
+async function _retrySaveAfterReauth(){
+  const ok = await _ensureWriteAuth();
+  if(ok){
+    const errEl = document.getElementById('saveBarPermErr');
+    if(errEl) errEl.remove();
+    await saveAllShiftChanges();
+  }
+}
+
 async function saveAllShiftChanges(){
   const entries = Object.values(_pendingShiftChanges);
   if(!entries.length){ toast('कोई बदलाव नहीं है'); return; }
@@ -12982,8 +13174,22 @@ async function saveAllShiftChanges(){
 
     const savedEntries = [...entries];
 
-    // Ensure role nodes exist before write (fixes PERMISSION_DENIED for managers)
-    try{ await _syncAuthRoleNodes(); }catch(e){}
+    // Ensure phone-auth (not anonymous) before write — may open OTP modal, no full logout
+    const okAuth = await _ensureWriteAuth();
+    if(!okAuth){
+      restoreBtn();
+      toast('❌ Phone verify करें — Logout ज़रूरी नहीं');
+      try{
+        const list = document.getElementById('saveBarList');
+        if(list){
+          let errEl = document.getElementById('saveBarPermErr');
+          if(!errEl){ errEl=document.createElement('div'); errEl.id='saveBarPermErr'; list.parentNode.insertBefore(errEl, list); }
+          errEl.style.cssText='background:rgba(244,63,94,.18);border:1.5px solid #f43f5e;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#fecdd3;font-size:12px;font-weight:800;line-height:1.45';
+          errEl.innerHTML='⛔ Write auth missing<br>एक बार <b>Phone OTP verify</b> करें (app खुला रहेगा)। फिर Save दबाएँ।';
+        }
+      }catch(e){}
+      return;
+    }
 
     // Save only the changed keys using fbUpdate (atomic per-key write)
     // Clear pending ONLY after success so a failed save keeps the Save bar
@@ -13173,10 +13379,9 @@ async function saveAllShiftChanges(){
     const msg = (err && (err.message||err.code)) || 'Network error';
     const isPerm = /permission|PERMISSION_DENIED/i.test(String(msg));
     const friendly = isPerm
-      ? '❌ Permission Denied — Manager/Admin के रूप में OTP से दोबारा Login करें, फिर Save करें'
+      ? '❌ Permission Denied — Phone OTP verify करें (Logout नहीं)'
       : ('❌ Save failed: '+msg+' — कृपया दोबारा try करें');
     toast(friendly);
-    // High-contrast inline error in Save bar
     try{
       const list = document.getElementById('saveBarList');
       if(list){
@@ -13188,9 +13393,12 @@ async function saveAllShiftChanges(){
           list.parentNode.insertBefore(errEl, list);
         }
         errEl.style.cssText = 'background:rgba(244,63,94,.18);border:1.5px solid #f43f5e;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#fecdd3;font-size:12px;font-weight:800;line-height:1.45';
-        errEl.innerHTML = isPerm
-          ? '⛔ <b>PERMISSION_DENIED</b><br>Schedule save के लिए Manager/Admin OTP login ज़रूरी है। Logout → Phone OTP से Login → फिर Save करें।'
-          : ('⛔ Save error: '+String(msg).replace(/</g,'&lt;'));
+        if(isPerm){
+          errEl.innerHTML = '⛔ <b>PERMISSION_DENIED</b><br>Firebase में anonymous session है। <b>Logout की ज़रूरत नहीं</b> — नीचे से Phone verify करें, फिर Save।'
+            + '<br><button type="button" onclick="_retrySaveAfterReauth()" style="margin-top:8px;width:100%;padding:10px;border:none;border-radius:8px;background:#f97316;color:#fff;font-weight:900;cursor:pointer">🔐 Phone verify &amp; retry Save</button>';
+        } else {
+          errEl.innerHTML = '⛔ Save error: '+String(msg).replace(/</g,'&lt;');
+        }
       }
     }catch(e2){}
   }
@@ -14895,7 +15103,7 @@ async function _execPrint(){
     });
   });
 
-  // Summary rows D/N/L
+  // Summary rows D/N/L + Total Manpower (filtered roster)
   const printedEmps=PRINT_GROUPS.flatMap(g=>allEmps.filter(g.filter));
   ['D','N','L'].forEach(s=>{
     const lbRow=s==='D'?'☀️ Day':s==='N'?'🌙 Night':'🏖️ Leave';
@@ -14908,6 +15116,12 @@ async function _execPrint(){
       }).join('')}
     </tr>`;
   });
+  // Total Manpower row (same roster size under each date — matches on-screen 👥 Total)
+  const _printTotalMP = printedEmps.length;
+  tbodyHtml+=`<tr style="border-top:2px solid #16a34a">
+    <td style="font-size:9px;font-weight:900;color:#15803d;padding:4px 6px;background:#f0fdf4;border-right:2px solid #334155">👥 Total</td>
+    ${dates.map(()=>`<td style="text-align:center;font-weight:900;font-size:11px;color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0">${_printTotalMP||'—'}</td>`).join('')}
+  </tr>`;
 
   // Date header cells
   const dateHdrCells=dates.map(d=>{

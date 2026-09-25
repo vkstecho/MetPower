@@ -1234,17 +1234,63 @@ window.addEventListener('appinstalled', function () {
   <div class="modal" onclick="event.stopPropagation()" style="max-height:95vh">
     <div class="modal-handle"></div>
     <div class="modal-title">📤 Excel से Team Data Update करें</div>
-    <div style="background:rgba(56,189,248,.07);border:1px solid rgba(56,189,248,.2);border-radius:12px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--muted2);line-height:1.7">
-      📌 Excel में ये <b style="color:#fff">Column Headers</b> होने चाहिए:<br>
-      <span style="color:var(--s1);font-weight:700">Employee Code</span> · 
-      <span style="color:var(--s1);font-weight:700">Name</span> · 
-      <span style="color:var(--s1);font-weight:700">Mobile</span> · 
-      <span style="color:var(--s1);font-weight:700">Designation</span> · 
-      <span style="color:var(--s1);font-weight:700">Machine</span> · 
-      <span style="color:var(--s1);font-weight:700">DOJ</span> · 
-      <span style="color:var(--s1);font-weight:700">Weekly Off</span> · 
-      <span style="color:#fbbf24;font-weight:700">Monthly Salary</span><br>
-      <span style="color:var(--day);font-size:11px">Employee Code से match करके existing data update होगा · खाली column = पुराना data रहेगा</span>
+    <div style="background:rgba(56,189,248,.07);border:1px solid rgba(56,189,248,.2);border-radius:12px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--muted2);line-height:1.55">
+      <div style="font-weight:900;color:#fff;margin-bottom:8px">📌 Team Excel format (snapshot guide)</div>
+      <div style="font-size:11px;margin-bottom:8px">Row 1 = headers. Example — same style as your sheet:</div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid rgba(255,255,255,.12);margin-bottom:10px">
+        <table style="border-collapse:collapse;font-size:10px;min-width:640px;width:100%;font-family:system-ui,sans-serif">
+          <thead>
+            <tr style="background:#1e293b;color:#e2e8f0">
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Name</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Emp ID</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Designation</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Weekly Off</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Mobile</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Joining Date</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Date of Birth</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Machine</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap">Responsibility</th>
+              <th style="padding:6px 5px;border:1px solid #334155;white-space:nowrap;color:#fbbf24">Salary</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background:#0f172a;color:#cbd5e1">
+              <td style="padding:5px;border:1px solid #334155">DINESH</td>
+              <td style="padding:5px;border:1px solid #334155">50000555</td>
+              <td style="padding:5px;border:1px solid #334155">Team Member</td>
+              <td style="padding:5px;border:1px solid #334155">TUE</td>
+              <td style="padding:5px;border:1px solid #334155">9695887766</td>
+              <td style="padding:5px;border:1px solid #334155">23-09-2024</td>
+              <td style="padding:5px;border:1px solid #334155">01-01-1994</td>
+              <td style="padding:5px;border:1px solid #334155">M-1</td>
+              <td style="padding:5px;border:1px solid #334155">Operation</td>
+              <td style="padding:5px;border:1px solid #334155;color:#fbbf24">25000</td>
+            </tr>
+            <tr style="background:#0f172a;color:#cbd5e1">
+              <td style="padding:5px;border:1px solid #334155">SURAJ</td>
+              <td style="padding:5px;border:1px solid #334155">50000556</td>
+              <td style="padding:5px;border:1px solid #334155">Team Member</td>
+              <td style="padding:5px;border:1px solid #334155">WED</td>
+              <td style="padding:5px;border:1px solid #334155">7408920675</td>
+              <td style="padding:5px;border:1px solid #334155">01-09-2025</td>
+              <td style="padding:5px;border:1px solid #334155">01-01-1994</td>
+              <td style="padding:5px;border:1px solid #334155">M-1</td>
+              <td style="padding:5px;border:1px solid #334155">Operation</td>
+              <td style="padding:5px;border:1px solid #334155;color:#fbbf24">48000</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;line-height:1.7">
+        <b style="color:#f97316">Required:</b> <span style="color:#fff">Name</span>, <span style="color:#fff">Emp ID</span><br>
+        <b style="color:#22c55e">Recommended:</b> Designation, Weekly Off (MON–SUN), Mobile (10 digit), Machine (M-1, M-2, S-1, S-2), Responsibility<br>
+        <b style="color:#fbbf24">Optional:</b> Joining Date, Date of Birth, Salary (numbers only)<br>
+        <span style="color:var(--day)">Emp ID से match → existing update · खाली cell = पुराना data रहेगा</span><br>
+        <span style="color:#94a3b8">Shift date columns (01-Jul-25 …) इस Team upload में ignore होते हैं — shifts के लिए Schedule Excel upload use करें।</span>
+      </div>
+      <button type="button" onclick="downloadTeamExcelTemplate()" style="margin-top:10px;width:100%;padding:10px;border-radius:10px;border:1px dashed rgba(56,189,248,.45);background:rgba(56,189,248,.08);color:#7dd3fc;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">
+        ⬇️ Download sample Excel template
+      </button>
     </div>
     <div id="teamExcelDropZone" onclick="document.getElementById('teamExcelFileInput').click()"
       style="border:2px dashed var(--border2);border-radius:14px;padding:28px;text-align:center;cursor:pointer;background:var(--card);margin-bottom:14px;transition:border-color .2s"
