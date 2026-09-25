@@ -165,8 +165,8 @@ window.addEventListener('appinstalled', function () {
         <div style="font-size:13px;color:#e2e8f0;font-weight:600;margin-top:4px" id="otpSentTo">OTP भेजा गया</div>
       </div>
       <div class="err-msg" id="loginErr2"></div>
-      <input class="inp-field" type="tel" id="otpInput" placeholder="- - - - - -"
-        inputmode="numeric" maxlength="6"
+      <input class="inp-field" type="tel" id="otpInput" name="one-time-code" placeholder="- - - - - -"
+        inputmode="numeric" maxlength="6" autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" spellcheck="false"
         oninput="this.value=this.value.replace(/[^0-9]/g,'');_onOtpInput(this.value)"
         onkeydown="if(event.key==='Enter')_verifyOTP()"
         style="font-size:28px;letter-spacing:10px;text-align:center;margin-bottom:12px">

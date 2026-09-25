@@ -955,6 +955,7 @@ function myShiftConfigKey(companyIdOverride){
   if(SESSION.role==='member' && SESSION.managerId) return 'mgr:'+SESSION.managerId;
   return 'company:'+myCompanyId(); // legacy employee-code system — shared at company level
 }
+function getDefaultShiftConfig(){ return _defaultShiftConfig(); }
 function _defaultShiftConfig(){
   return {
     shiftCount: 2,
@@ -975,6 +976,13 @@ function _defaultShiftConfig(){
     hideSummaryABC: false,  // Profile: hide A, B, C count rows + legend
     // WhatsApp message when schedule is saved (placeholders: {name} {changes} {manager} {date})
     waShiftTemplate: '🔔 *MET Power — Shift Update*\n\nनमस्ते *{name}*,\n\nआपकी shift में बदलाव हुआ है:\n{changes}\n\nकोई सवाल हो तो Manager से संपर्क करें।\n_— {manager}_',
+    // Per-type notification templates (editable in Shift Settings / Profile)
+    // Placeholders: {name} {date} {dates} {manager} {changes} {gpCount} {gpMax}
+    waLeaveTemplate: '🏖️ *MET Power — Leave*\n_{date}_\n\nनमस्ते *{name}*,\n\nआपकी *Leave* mark की गई है:\n{dates}\n\nकृपया duty के अनुसार वापसी सुनिश्चित करें।\n_— {manager}_',
+    waAbsentTemplate: '⚠️ *MET Power — Absent (अनुशासनहीनता)*\n_{date}_\n\n*ध्यान दें {name}*,\n\nआप *बिना अनुमति / बिना सूचना* अनुपस्थित (Absent) चिह्नित किए गए हैं:\n{dates}\n\nयह *अनुशासनहीन व्यवहार* माना जाता है।\n• बिना अनुमति duty छोड़ना गंभीर उल्लंघन है\n• वेतन कटौती / NCR / अनुशासनात्मक कार्रवाई हो सकती है\n• दोबारा ऐसा होने पर सख्त कार्रवाई की जाएगी\n\nतुरंत Manager से संपर्क करें।\n_— {manager}_',
+    waGPTemplate: '🪪 *MET Power — Gate Pass*\n_{date}_\n\nनमस्ते *{name}*,\n\nआपको *Gate Pass (GP)* दिया गया है:\n{dates}\n\n📌 *नियम:* एक महीने में अधिकतम *{gpMax}* Gate Pass ही अनुमत हैं।\nइस महीने आपके GP: *{gpCount}/{gpMax}*\n\nअधिक GP के लिए Manager की विशेष अनुमति आवश्यक है।\n_— {manager}_',
+    waHolidayTemplate: '🎉 *MET Power — Holiday*\n_{date}_\n\nनमस्ते *{name}*,\n\nनिम्न तिथि(याँ) *Holiday* चिह्नित की गई हैं:\n{dates}\n\nशुभ अवकाश!\n_— {manager}_',
+    gpMaxPerMonth: 2,
     waNotifyOnSave: true,
     metallisers: ['M1','M2'],
     slitters: ['S1','S2'],
@@ -1968,6 +1976,9 @@ async function _sendOTP(isResend){
     if(sentEl) sentEl.textContent='+91-'+mobile+' पर OTP भेजा गया';
     document.getElementById('otpInput')?.focus();
     _startResendTimer();
+    _startWebOtpListen('otpInput', code=>{
+      if(code && code.length===6) setTimeout(()=>{ try{ _verifyOTP(); }catch(e){} }, 250);
+    });
     toast('✅ OTP भेज दिया!');
   }catch(err){
     console.error('OTP error:',err);
@@ -1994,6 +2005,8 @@ function _startResendTimer(){
 }
 
 async function _verifyOTP(){
+  _stopWebOtpListen();
+
   // If device OTP overlay is open, use device flow
   const ov = document.getElementById('otpLoginOverlay');
   if(_otpEmp && ov && ov.style.display !== 'none' && ov.style.display !== ''){
@@ -2839,6 +2852,70 @@ function _forgotPw(empId, empName){
 }
 
 // ════════════════════════════════════════
+
+// ── Web OTP API: auto-read SMS OTP on supported browsers (Chrome Android) ──
+// Requires HTTPS. SMS format ideally includes: @your-domain #123456
+// iOS/Safari: autocomplete="one-time-code" shows keyboard suggestion from Messages.
+let _webOtpAbort = null;
+function _stopWebOtpListen(){
+  try{ if(_webOtpAbort){ _webOtpAbort.abort(); } }catch(e){}
+  _webOtpAbort = null;
+}
+/**
+ * Listen for SMS OTP and fill #otpInput (or given selector).
+ * @param {string} inputId
+ * @param {function} [onFilled] called with 6-digit code
+ */
+function _startWebOtpListen(inputId, onFilled){
+  _stopWebOtpListen();
+  const el = document.getElementById(inputId || 'otpInput');
+  if(el){
+    try{
+      el.setAttribute('autocomplete', 'one-time-code');
+      el.setAttribute('inputmode', 'numeric');
+      el.setAttribute('name', 'one-time-code');
+    }catch(e){}
+  }
+  // Web OTP API (Chrome Android 84+, secure context)
+  if(typeof window.OTPCredential === 'undefined' || !navigator.credentials || !window.isSecureContext){
+    return;
+  }
+  try{
+    _webOtpAbort = new AbortController();
+    navigator.credentials.get({
+      otp: { transport: ['sms'] },
+      signal: _webOtpAbort.signal
+    }).then(cred=>{
+      if(!cred || !cred.code) return;
+      const code = String(cred.code).replace(/\D/g,'').slice(0,6);
+      if(code.length < 4) return;
+      const input = document.getElementById(inputId || 'otpInput');
+      if(input){
+        input.value = code;
+        input.dispatchEvent(new Event('input', { bubbles:true }));
+      }
+      toast('📲 OTP SMS से auto-fill हो गया');
+      if(typeof onFilled === 'function') onFilled(code);
+      else if(code.length === 6){
+        // Auto-verify after short delay so UI updates
+        setTimeout(()=>{
+          try{
+            if(document.getElementById('otpLoginOverlay')?.style.display && document.getElementById('otpLoginOverlay').style.display !== 'none' && typeof _verifyDeviceOTP==='function')
+              _verifyDeviceOTP();
+            else if(typeof _verifyOTP==='function')
+              _verifyOTP();
+          }catch(e){}
+        }, 300);
+      }
+    }).catch(err=>{
+      // AbortError = user navigated away / we cancelled — ignore
+      if(err && err.name === 'AbortError') return;
+      console.warn('[WebOTP]', err && err.message);
+    });
+  }catch(e){ console.warn('[WebOTP] not available', e.message); }
+}
+
+
 // SHARED FIREBASE PHONE OTP
 // ════════════════════════════════════════
 function _fbPhoneAuthReady(){
@@ -3010,7 +3087,8 @@ async function showOTPLoginScreen(emp, deviceId){
         </div>
         <div style="background:#162032;border:1.5px solid #3b5a8a;border-radius:14px;padding:20px;margin-bottom:14px;text-align:left">
           <div style="font-size:11px;font-weight:800;color:#64748b;letter-spacing:1px;margin-bottom:10px">6-digit OTP डालें *</div>
-          <input id="otpInput" type="tel" inputmode="numeric" placeholder="● ● ● ● ● ●" maxlength="6"
+          <input id="otpInput" type="tel" name="one-time-code" inputmode="numeric" placeholder="● ● ● ● ● ●" maxlength="6"
+            autocomplete="one-time-code" enterkeyhint="done" autocapitalize="off" spellcheck="false"
             style="width:100%;box-sizing:border-box;background:#1e3251;border:1.5px solid #60a5fa;border-radius:10px;
                    padding:16px;color:#fff;-webkit-text-fill-color:#fff;caret-color:#f97316;
                    font-size:28px;text-align:center;outline:none;font-family:inherit;letter-spacing:8px;box-shadow:0 0 0 2px rgba(96,165,250,.3)"
@@ -3068,6 +3146,7 @@ async function _sendDeviceOTP(isResend){
     if(s1) s1.style.display='none';
     if(s2) s2.style.display='block';
     document.getElementById('otpInput')?.focus();
+    _startWebOtpListen('otpInput', code=>{ if(code&&code.length===6) setTimeout(()=>{ try{ _verifyDeviceOTP(); }catch(e){} }, 250); });
     toast('✅ OTP भेज दिया!');
   }catch(err){
     console.error('Device OTP send', err);
@@ -3079,6 +3158,8 @@ async function _sendDeviceOTP(isResend){
 }
 
 async function _verifyDeviceOTP(){
+  _stopWebOtpListen();
+
   if(_deviceOtpBusy) return;
   const otp=(document.getElementById('otpInput')?.value||'').replace(/\D/g,'').slice(0,6);
   if(otp.length!==6){ toast('⚠️ 6 अंकों का OTP डालें'); return; }
@@ -3752,7 +3833,14 @@ function _renderShiftSettingsModal(){
   // Ensure each machine has an entry (default from group min)
   (d.metallisers||[]).forEach(m=>{ if(d.minBySec[m]==null) d.minBySec[m]=d.minMet; });
   (d.slitters||[]).forEach(m=>{ if(d.minBySec[m]==null) d.minBySec[m]=d.minSlit; });
-  d.shiftCount = d.shifts.filter(s=>s.active).length;
+    // Seed type-wise WA templates from defaults if missing
+  const _d0 = _defaultShiftConfig();
+  if(!d.waLeaveTemplate) d.waLeaveTemplate = _d0.waLeaveTemplate;
+  if(!d.waAbsentTemplate) d.waAbsentTemplate = _d0.waAbsentTemplate;
+  if(!d.waGPTemplate) d.waGPTemplate = _d0.waGPTemplate;
+  if(!d.waHolidayTemplate) d.waHolidayTemplate = _d0.waHolidayTemplate;
+  if(d.gpMaxPerMonth==null) d.gpMaxPerMonth = 2;
+d.shiftCount = d.shifts.filter(s=>s.active).length;
   openModal(`<div class="modal-handle"></div>
   <div class="modal-title">⚙️ Shift & Machine Settings</div>
   <div style="font-size:12px;color:#94a3b8;margin-bottom:14px">
@@ -3816,8 +3904,41 @@ function _renderShiftSettingsModal(){
     <input type="checkbox" ${d.waNotifyOnSave!==false?'checked':''} onchange="_shiftDraft.waNotifyOnSave=this.checked" style="width:18px;height:18px;accent-color:#22c55e">
     <span style="font-size:13px;font-weight:700;color:var(--text)">Send WhatsApp after Save</span>
   </label>
-  <textarea id="ss_waTemplate" rows="7" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box"
+  <textarea id="ss_waTemplate" rows="5" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box"
     oninput="_shiftDraft.waShiftTemplate=this.value">${(d.waShiftTemplate||'').replace(/</g,'&lt;')}</textarea>
+
+  <div style="font-size:12px;font-weight:800;color:#e879f9;margin:18px 0 6px">✉️ Type-wise notification templates</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.45">
+    L / Ab / GP / H mark करने पर ये message WhatsApp पर जाएँगे। Edit करके Save करें।
+    Placeholders: <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{name}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{date}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{dates}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{manager}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{gpCount}</code>
+    <code style="background:rgba(0,0,0,.25);padding:1px 4px;border-radius:4px">{gpMax}</code>
+  </div>
+
+  <div style="font-size:11px;font-weight:800;color:#fda4af;margin:8px 0 4px">🏖️ L — Leave</div>
+  <textarea id="ss_waLeave" rows="4" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(244,63,94,.35);background:var(--card);color:var(--text);font-size:12px;line-height:1.45;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:10px"
+    oninput="_shiftDraft.waLeaveTemplate=this.value">${(d.waLeaveTemplate||'').replace(/</g,'&lt;')}</textarea>
+
+  <div style="font-size:11px;font-weight:800;color:#fca5a5;margin:4px 0 4px">⚠️ Ab — Absent (strict / undisciplined)</div>
+  <textarea id="ss_waAbsent" rows="6" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(127,29,29,.5);background:var(--card);color:var(--text);font-size:12px;line-height:1.45;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:10px"
+    oninput="_shiftDraft.waAbsentTemplate=this.value">${(d.waAbsentTemplate||'').replace(/</g,'&lt;')}</textarea>
+
+  <div style="font-size:11px;font-weight:800;color:#c4b5fd;margin:4px 0 4px">🪪 GP — Gate Pass (max/month)</div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+    <span style="font-size:12px;color:var(--muted2);font-weight:700">Max GP / month</span>
+    <input type="number" id="ss_gpMax" min="1" max="10" value="${d.gpMaxPerMonth!=null?d.gpMaxPerMonth:2}"
+      style="width:64px;padding:8px;border-radius:8px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-weight:900;text-align:center"
+      oninput="_shiftDraft.gpMaxPerMonth=Math.max(1,Number(this.value)||2)">
+  </div>
+  <textarea id="ss_waGP" rows="5" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(109,40,217,.4);background:var(--card);color:var(--text);font-size:12px;line-height:1.45;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:10px"
+    oninput="_shiftDraft.waGPTemplate=this.value">${(d.waGPTemplate||'').replace(/</g,'&lt;')}</textarea>
+
+  <div style="font-size:11px;font-weight:800;color:#fdba74;margin:4px 0 4px">🎉 H — Holiday</div>
+  <textarea id="ss_waHoliday" rows="4" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(234,88,12,.4);background:var(--card);color:var(--text);font-size:12px;line-height:1.45;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:8px"
+    oninput="_shiftDraft.waHolidayTemplate=this.value">${(d.waHolidayTemplate||'').replace(/</g,'&lt;')}</textarea>
 
   <div style="font-size:12px;font-weight:800;color:#f97316;margin:18px 0 8px">🏭 Metalliser Machines</div>
   <div id="ss_metallisers">${_renderMachineRows('metallisers')}</div>
@@ -3926,10 +4047,26 @@ async function _saveShiftSettings(){
   try{
     const ta = document.getElementById('ss_waTemplate');
     if(ta) _shiftDraft.waShiftTemplate = ta.value;
+    const map = [
+      ['ss_waLeave','waLeaveTemplate'],
+      ['ss_waAbsent','waAbsentTemplate'],
+      ['ss_waGP','waGPTemplate'],
+      ['ss_waHoliday','waHolidayTemplate']
+    ];
+    for(const [id,key] of map){
+      const el = document.getElementById(id);
+      if(el) _shiftDraft[key] = el.value;
+    }
+    const gpEl = document.getElementById('ss_gpMax');
+    if(gpEl) _shiftDraft.gpMaxPerMonth = Math.max(1, Number(gpEl.value)||2);
   }catch(e){}
-  if(!_shiftDraft.waShiftTemplate){
-    _shiftDraft.waShiftTemplate = getDefaultShiftConfig().waShiftTemplate;
-  }
+  const _def = (typeof getDefaultShiftConfig==='function' ? getDefaultShiftConfig() : _defaultShiftConfig());
+  if(!_shiftDraft.waShiftTemplate) _shiftDraft.waShiftTemplate = _def.waShiftTemplate;
+  if(!_shiftDraft.waLeaveTemplate) _shiftDraft.waLeaveTemplate = _def.waLeaveTemplate;
+  if(!_shiftDraft.waAbsentTemplate) _shiftDraft.waAbsentTemplate = _def.waAbsentTemplate;
+  if(!_shiftDraft.waGPTemplate) _shiftDraft.waGPTemplate = _def.waGPTemplate;
+  if(!_shiftDraft.waHolidayTemplate) _shiftDraft.waHolidayTemplate = _def.waHolidayTemplate;
+  if(!_shiftDraft.gpMaxPerMonth) _shiftDraft.gpMaxPerMonth = 2;
   if(!_shiftDraft.minBySec) _shiftDraft.minBySec = {};
   const ok=await saveShiftConfig(_shiftDraft);
   if(ok){
@@ -4116,6 +4253,11 @@ async function showProfile(){
         <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">${SESSION.viewCompanyId&&SESSION.viewCompanyId!=='ALL'?'चुनी गई Company के लिए':'पहले header से Company चुनें'}</div></div>
         <div class="pa-arrow">›</div>
       </button>
+      <button class="profile-action" onclick="closeModal();openHolidayListModal()">
+        <div class="pa-icon" style="background:rgba(245,158,11,.12)">📅</div>
+        <div><div class="pa-label">Holiday List</div><div class="pa-sub">Date + Reason · Excel / image upload</div></div>
+        <div class="pa-arrow">›</div>
+      </button>
       <button class="profile-action danger" onclick="doLogout()" style="margin-top:4px">
         <div class="pa-icon" style="background:rgba(244,63,94,.12)">🚪</div>
         <div><div class="pa-label">Logout</div><div class="pa-sub">सभी sessions साफ़ करें</div></div>
@@ -4190,6 +4332,11 @@ async function showProfile(){
       ${isMgr()?`<button class="profile-action" onclick="openShiftSettings()">
         <div class="pa-icon" style="background:rgba(168,85,247,.12)">⚙️</div>
         <div><div class="pa-label">Shift & Machine Settings</div><div class="pa-sub">Shifts, Metalliser/Slitter setup</div></div>
+        <div class="pa-arrow">›</div>
+      </button>
+      <button class="profile-action" onclick="openHolidayListModal()">
+        <div class="pa-icon" style="background:rgba(245,158,11,.12)">📅</div>
+        <div><div class="pa-label">Holiday List</div><div class="pa-sub">Date + Reason · Excel / snapshot</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
       ${SESSION.role==='manager'?`<button class="profile-action" onclick="openChangeCompanyModal()">
@@ -6372,6 +6519,16 @@ function renderSchedule(){
     ${dates.map(d => {
       const cnt = allEmps.filter(e=>{const s=getShift(e,d);return s==='L'||s==='Ab';}).length;
       return `<td style="${summaryStyles}color:#f43f5e;background:rgba(244,63,94,.06)">${cnt||'—'}</td>`;
+    }).join('')}
+  </tr>`;
+
+  // Total Manpower = roster size of currently filtered section (All / Metalliser / Slitter / …)
+  const _totalMP = allEmps.length;
+  tbody += `<tr style="border-top:1.5px solid var(--border2)">
+    <td class="ecol" style="font-size:10px;font-weight:900;color:#22c55e;padding:5px 6px;white-space:nowrap;background:rgba(34,197,94,.08)">👥 Total</td>
+    ${dates.map(d => {
+      // Same roster total for the filtered view (section headcount)
+      return `<td style="${summaryStyles}color:#22c55e;background:rgba(34,197,94,.08);font-size:14px">${_totalMP||'—'}</td>`;
     }).join('')}
   </tr>`;
 
@@ -10626,7 +10783,7 @@ async function _openDeleteAllOtpModal(teamCount, mobile){
     <div id="delAllStatus" style="font-size:12px;color:#f59e0b;margin-bottom:10px">⏳ Sending OTP…</div>
     <div class="field">
       <label>OTP (6 digits)</label>
-      <input type="text" id="delAllOtpInput" maxlength="6" inputmode="numeric" placeholder="••••••"
+      <input type="text" id="delAllOtpInput" maxlength="6" inputmode="numeric" autocomplete="one-time-code" name="one-time-code" placeholder="••••••"
         style="width:100%;letter-spacing:6px;font-size:20px;font-weight:900;text-align:center"
         oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6)">
     </div>
@@ -12365,6 +12522,360 @@ function toast(msg){
 // PRINT
 // ════════════════════════════════════════
 // ══════════════════════════════════════════════
+
+
+// ══════════════════════════════════════════════
+// HOLIDAY LIST (Manager profile) — Date + Reason
+// Stored at: holidayLists/{companyKey}
+// Excel columns: Date | Reason
+// ══════════════════════════════════════════════
+function _holidayListKey(){
+  try{
+    if(typeof myShiftConfigKey==='function'){
+      const k = myShiftConfigKey();
+      if(k) return k.replace(/[:.#$\[\]]/g,'_');
+    }
+  }catch(e){}
+  const c = (SESSION.companyId||SESSION.viewCompanyId||SESSION.company||'MET').toString();
+  return c.replace(/[:.#$\[\]]/g,'_');
+}
+
+async function loadHolidayList(){
+  try{
+    const key = _holidayListKey();
+    const rec = await fbGet('holidayLists/'+key);
+    if(rec && Array.isArray(rec.items)) return rec;
+    if(rec && rec.items && typeof rec.items==='object') return { items: Object.values(rec.items), snapshotUrl: rec.snapshotUrl||null };
+    return { items: [], snapshotUrl: null };
+  }catch(e){ return { items: [], snapshotUrl: null }; }
+}
+
+async function saveHolidayList(data){
+  const key = _holidayListKey();
+  const payload = {
+    items: (data.items||[]).map(x=>({
+      id: x.id || ('h_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)),
+      date: String(x.date||'').slice(0,10),
+      reason: String(x.reason||'').trim()
+    })).filter(x=>x.date),
+    snapshotUrl: data.snapshotUrl || null,
+    updatedAt: new Date().toISOString(),
+    updatedBy: SESSION.name||''
+  };
+  await fbSet('holidayLists/'+key, payload);
+  return payload;
+}
+
+function _parseHolidayDate(raw){
+  if(raw == null || raw === '') return '';
+
+  // Native Date (SheetJS cellDates:true + raw cells)
+  if(Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw.getTime())){
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth()+1).padStart(2,'0');
+    const d = String(raw.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+d;
+  }
+
+  // Excel serial number (days since 1899-12-30, with 1900 leap-year bug handled by epoch)
+  if(typeof raw === 'number' && isFinite(raw)){
+    // Time-of-day fractions ignored; valid holiday serials roughly 30000–60000 (1982–2064)
+    if(raw > 20000 && raw < 80000){
+      const utc = Date.UTC(1899, 11, 30) + Math.floor(raw) * 86400000;
+      const d = new Date(utc);
+      // Correct for timezone shift by using UTC components
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth()+1).padStart(2,'0');
+      const day = String(d.getUTCDate()).padStart(2,'0');
+      return y+'-'+m+'-'+day;
+    }
+    return '';
+  }
+
+  let s = String(raw).trim();
+  if(!s) return '';
+
+  // Strip time portion: "2026-01-26 00:00:00" / "26/01/2026 12:00"
+  s = s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\s*[AaPp][Mm])?$/, '').trim();
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if(m){
+    return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY (India common)
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if(m){
+    const day = parseInt(m[1],10), mon = parseInt(m[2],10), year = parseInt(m[3],10);
+    // If first part > 12, treat as DD/MM; if second > 12 treat as MM/DD already swapped unlikely
+    if(mon >= 1 && mon <= 12 && day >= 1 && day <= 31){
+      return year+'-'+String(mon).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+    }
+  }
+
+  // "26 Jan 2026" / "Jan 26, 2026" / "26 January 2026"
+  const parsed = Date.parse(s);
+  if(!isNaN(parsed)){
+    const d = new Date(parsed);
+    if(!isNaN(d.getTime())){
+      // Prefer local date parts for named months
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    }
+  }
+
+  // Numeric string that is Excel serial
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n = Number(s);
+    if(n > 20000 && n < 80000) return _parseHolidayDate(n);
+  }
+
+  return '';
+}
+
+/** Split a CSV line respecting double-quoted fields. */
+function _splitCsvLine(line){
+  const out = [];
+  let cur = '', inQ = false;
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(inQ){
+      if(ch === '"'){
+        if(line[i+1] === '"'){ cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else {
+      if(ch === '"') inQ = true;
+      else if(ch === ',' || ch === '\t' || ch === ';'){ out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map(c=>c.trim());
+}
+
+/** Load SheetJS once. */
+async function _ensureXlsxLib(){
+  if(window.XLSX) return;
+  await new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = ()=>reject(new Error('SheetJS load failed'));
+    document.head.appendChild(s);
+  });
+}
+
+/**
+ * Parse raw sheet rows into holiday items.
+ * Supports flexible headers: Date / दिनांक / Holiday Date, Reason / Occasion / त्योहार / Description
+ * Returns { items:[{date,reason}], errors:[string], meta:{dateCol,reasonCol,headerRow} }
+ */
+function parseHolidayExcelRows(rows){
+  const result = { items: [], errors: [], meta: { dateCol: 0, reasonCol: 1, headerRow: -1 } };
+  if(!rows || !rows.length){
+    result.errors.push('File खाली है');
+    return result;
+  }
+
+  // Normalize each cell to string or Date/number for date parser
+  const normRows = rows.map(r=>{
+    if(!r) return [];
+    if(!Array.isArray(r)) r = Object.values(r);
+    return r.map(c => (c == null ? '' : c));
+  });
+
+  const DATE_ALIASES = [
+    'date','holiday date','holidaydate','hdate','dt','day',
+    'दिनांक','तारीख','तिथि','holiday','छुट्टी की तारीख'
+  ];
+  const REASON_ALIASES = [
+    'reason','occasion','festival','name','holiday name','holidayname',
+    'description','desc','title','event','remarks','remark','note','notes',
+    'कारण','त्योहार','अवसर','नाम','विवरण','छुट्टी','holiday reason'
+  ];
+
+  function headerScore(cell){
+    const h = String(cell||'').toLowerCase().replace(/[\s_\-]+/g,' ').trim();
+    return h;
+  }
+
+  // Find header row within first 5 rows
+  let headerRow = -1, dateCol = -1, reasonCol = -1;
+  for(let i=0;i<Math.min(5, normRows.length);i++){
+    const row = normRows[i];
+    let dIdx = -1, rIdx = -1;
+    row.forEach((cell, ci)=>{
+      const h = headerScore(cell);
+      if(!h) return;
+      if(dIdx < 0 && DATE_ALIASES.some(a => h === a || h.includes(a))) dIdx = ci;
+      if(rIdx < 0 && REASON_ALIASES.some(a => h === a || h.includes(a))) rIdx = ci;
+    });
+    // Prefer a row that matched at least Date
+    if(dIdx >= 0){
+      headerRow = i;
+      dateCol = dIdx;
+      reasonCol = rIdx >= 0 ? rIdx : (dIdx === 0 ? 1 : 0);
+      break;
+    }
+  }
+
+  // No header: assume col0=Date, col1=Reason
+  if(headerRow < 0){
+    headerRow = -1;
+    dateCol = 0;
+    reasonCol = 1;
+  }
+
+  result.meta = { dateCol, reasonCol, headerRow };
+
+  const start = headerRow >= 0 ? headerRow + 1 : 0;
+  const seen = new Set();
+
+  for(let i = start; i < normRows.length; i++){
+    const row = normRows[i];
+    if(!row || !row.length) continue;
+    // skip fully empty
+    if(row.every(c => c === '' || c == null)) continue;
+
+    const rawDate = row[dateCol];
+    const rawReason = row[reasonCol];
+    // Sometimes reason is only in next non-empty cell
+    let reason = String(rawReason == null ? '' : rawReason).trim();
+    if(!reason){
+      for(let c=0;c<row.length;c++){
+        if(c === dateCol) continue;
+        const t = String(row[c]||'').trim();
+        if(t){ reason = t; break; }
+      }
+    }
+
+    const date = _parseHolidayDate(rawDate);
+    if(!date && !reason) continue;
+    if(!date){
+      result.errors.push('Row '+(i+1)+': invalid date "'+String(rawDate)+'"');
+      continue;
+    }
+    if(!reason){
+      result.errors.push('Row '+(i+1)+': reason missing ('+date+')');
+      continue;
+    }
+
+    // Validate calendar date
+    const parts = date.split('-').map(Number);
+    if(parts.length !== 3 || parts[1] < 1 || parts[1] > 12 || parts[2] < 1 || parts[2] > 31){
+      result.errors.push('Row '+(i+1)+': bad date '+date);
+      continue;
+    }
+
+    if(seen.has(date)){
+      // later row wins
+      result.items = result.items.filter(x => x.date !== date);
+    }
+    seen.add(date);
+    result.items.push({
+      id: 'h_'+date.replace(/-/g,'')+'_'+i,
+      date,
+      reason: reason.slice(0, 200)
+    });
+  }
+
+  result.items.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return result;
+}
+
+/** Read File → 2D rows array (xlsx / xls / csv). */
+async function _readHolidayFileToRows(file){
+  const name = (file.name||'').toLowerCase();
+  const buf = await file.arrayBuffer();
+
+  if(name.endsWith('.csv') || (file.type||'').includes('csv') || (file.type||'')==='text/plain'){
+    // Try UTF-8, fallback latin1 for older Hindi exports
+    let text = '';
+    try{ text = new TextDecoder('utf-8', {fatal:false}).decode(buf); }
+    catch(e){ text = new TextDecoder('windows-1252').decode(buf); }
+    // Strip BOM
+    if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    return text.split(/\r?\n/).filter(l=>l.trim().length).map(_splitCsvLine);
+  }
+
+  await _ensureXlsxLib();
+  // raw:true keeps Date objects & serial numbers for accurate parsing
+  const wb = XLSX.read(buf, { type:'array', cellDates:true });
+  const sheetName = wb.SheetNames[0];
+  if(!sheetName) return [];
+  const sheet = wb.Sheets[sheetName];
+  // header:1 → array of arrays; raw:true → Date/number preserved
+  return XLSX.utils.sheet_to_json(sheet, { header:1, raw:true, defval:'' });
+}
+
+async function _importHolidayExcel(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  try{
+    toast('⏳ Excel पढ़ रहे हैं…');
+    const rows = await _readHolidayFileToRows(file);
+    const parsed = parseHolidayExcelRows(rows);
+
+    if(!parsed.items.length){
+      const errHint = parsed.errors.slice(0,3).join(' · ');
+      toast(errHint
+        ? ('⚠️ कोई valid holiday नहीं · '+errHint)
+        : '⚠️ कोई valid row नहीं मिली — columns: Date | Reason');
+      input.value = '';
+      return;
+    }
+
+    // Merge by date (import overwrites same date)
+    const map = {};
+    (_holidayDraft.items||[]).forEach(it=>{ if(it && it.date) map[it.date]=it; });
+    parsed.items.forEach(it=>{ map[it.date]=it; });
+    _holidayDraft.items = Object.values(map).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+
+    let msg = '✅ '+parsed.items.length+' holidays import हुए (total '+_holidayDraft.items.length+')';
+    if(parsed.errors.length){
+      msg += ' · '+parsed.errors.length+' row skip';
+      console.warn('[Holiday Excel]', parsed.errors);
+    }
+    toast(msg);
+    _renderHolidayListModal();
+  }catch(e){
+    console.error('[Holiday Excel]', e);
+    toast('❌ Import failed: '+(e.message||e));
+  }
+  input.value = '';
+}
+
+async function _importHolidayImage(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  if(file.size > 4*1024*1024){ toast('⚠️ Image 4MB से छोटी रखें'); input.value=''; return; }
+  try{
+    const reader = new FileReader();
+    const dataUrl = await new Promise((res,rej)=>{ reader.onload=()=>res(reader.result); reader.onerror=rej; reader.readAsDataURL(file); });
+    // Prefer Firebase Storage if available
+    let url = dataUrl;
+    if(typeof window._fbUploadSelfie === 'function'){
+      const path = 'holidaySnapshots/'+_holidayListKey()+'/'+Date.now()+'.jpg';
+      const uploaded = await window._fbUploadSelfie(dataUrl, path);
+      if(uploaded) url = uploaded;
+    }
+    _holidayDraft.snapshotUrl = url;
+    toast('✅ Image attached');
+    _renderHolidayListModal();
+  }catch(e){ toast('❌ Image error: '+(e.message||e)); }
+  input.value='';
+}
+
+async function _saveHolidayListUI(){
+  try{
+    await saveHolidayList(_holidayDraft);
+    toast('✅ Holiday List save हो गई');
+    closeModal();
+  }catch(e){ toast('❌ Save failed: '+(e.message||e)); }
+}
+
+
 // ADMIN: SHIFT CELL EDIT
 // ══════════════════════════════════════════════
 // ════════════════════════════════════════
@@ -12552,7 +13063,16 @@ async function saveAllShiftChanges(){
 
         const allCO = changes.every(c => c.newShift === 'C/O');
         const allAb = changes.every(c => c.newShift === 'Ab');
+        const allL  = changes.every(c => c.newShift === 'L');
+        const allGP = changes.every(c => c.newShift === 'GP');
+        const allH  = changes.every(c => c.newShift === 'H');
         let msgLines;
+
+        const _datesList = changes.map(c => {
+          const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
+          return '• ' + fmtD;
+        }).join('\n');
+        const _defTpl = (typeof getDefaultShiftConfig==='function' ? getDefaultShiftConfig() : _defaultShiftConfig());
 
         if(allCO){
           msgLines = `🎁 *MET Power — Comp Off*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआपको Compensatory Off मिला है!\n\n`;
@@ -12570,12 +13090,11 @@ async function saveAllShiftChanges(){
           }
           msgLines += `_— ${SESSION.name||'Manager'}_`;
         } else if(allAb){
-          msgLines = `⚠️ *MET Power — अनुपस्थिति*\n_${todayFmt}_\n\nनमस्ते *${emp.name}*,\n\nआप बिना अनुमति अनुपस्थित चिह्नित किए गए:\n\n`;
-          for(const c of changes){
-            const fmtD = new Date(c.date).toLocaleDateString('hi-IN',{day:'numeric',month:'short',year:'numeric'});
-            msgLines += `• ${fmtD}\n`;
-          }
-          msgLines += `\n_— ${SESSION.name||'Manager'}_`;
+          const tpl = _waCfg.waAbsentTemplate || _defTpl.waAbsentTemplate || '';
+          msgLines = _fillNotifTemplate(tpl, {
+            name: emp.name, date: todayFmt, dates: _datesList,
+            manager: SESSION.name||'Manager', changes: _datesList
+          });
           for(const c of changes){
             try{
               const abKey = await fbPush('reports', {
@@ -12588,6 +13107,27 @@ async function saveAllShiftChanges(){
               await fbUpdate('reports/'+abKey, {_key: abKey});
             }catch(re){ console.warn('[Auto absent report]', re); }
           }
+        } else if(allL){
+          const tpl = _waCfg.waLeaveTemplate || _defTpl.waLeaveTemplate || '';
+          msgLines = _fillNotifTemplate(tpl, {
+            name: emp.name, date: todayFmt, dates: _datesList,
+            manager: SESSION.name||'Manager', changes: _datesList
+          });
+        } else if(allGP){
+          const gpMax = Math.max(1, Number(_waCfg.gpMaxPerMonth)||2);
+          const gpCount = _countGPInMonth(emp.id, changes[0].date);
+          const tpl = _waCfg.waGPTemplate || _defTpl.waGPTemplate || '';
+          msgLines = _fillNotifTemplate(tpl, {
+            name: emp.name, date: todayFmt, dates: _datesList,
+            manager: SESSION.name||'Manager', changes: _datesList,
+            gpCount, gpMax
+          });
+        } else if(allH){
+          const tpl = _waCfg.waHolidayTemplate || _defTpl.waHolidayTemplate || '';
+          msgLines = _fillNotifTemplate(tpl, {
+            name: emp.name, date: todayFmt, dates: _datesList,
+            manager: SESSION.name||'Manager', changes: _datesList
+          });
         } else {
           let changeLines = '';
           for(const c of changes){
@@ -12596,7 +13136,7 @@ async function saveAllShiftChanges(){
             const newL = shiftNames[c.newShift]||c.newShift;
             changeLines += `• ${fmtD}: ${oldL} → *${newL}*\n`;
           }
-          const tpl = (_waCfg.waShiftTemplate || (typeof getDefaultShiftConfig==='function' && getDefaultShiftConfig().waShiftTemplate) || '')
+          const tpl = (_waCfg.waShiftTemplate || _defTpl.waShiftTemplate || '')
             .replace(/\{name\}/g, emp.name||'')
             .replace(/\{manager\}/g, SESSION.name||'Manager')
             .replace(/\{date\}/g, todayFmt)
@@ -13247,6 +13787,39 @@ async function submitOD(empId, empName, date, currentShift){
   stageSingleShiftChange(empId, empName, date, currentShift, 'OD');
 }
 
+
+/** Count Gate Pass days for emp in YYYY-MM of given dateStr (includes pending GP for same month). */
+function _countGPInMonth(empId, dateStr){
+  let count = 0;
+  try{
+    const d0 = new Date(dateStr+'T12:00:00');
+    const y = d0.getFullYear(), m = d0.getMonth();
+    const emp = getEmps().find(e=>e.id===empId);
+    // Walk calendar days of that month
+    const daysInMonth = new Date(y, m+1, 0).getDate();
+    for(let day=1; day<=daysInMonth; day++){
+      const ds = y+'-'+String(m+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+      // pending override for this day wins
+      const pend = _pendingShiftChanges[empId+'__'+ds];
+      let sh = pend ? pend.newShift : (emp ? getShift(emp, ds) : null);
+      if(sh === 'GP') count++;
+    }
+  }catch(e){}
+  return count;
+}
+
+/** Apply notification template placeholders. */
+function _fillNotifTemplate(tpl, {name, date, dates, manager, changes, gpCount, gpMax}){
+  return String(tpl||'')
+    .replace(/\{name\}/g, name||'')
+    .replace(/\{date\}/g, date||'')
+    .replace(/\{dates\}/g, dates||'')
+    .replace(/\{manager\}/g, manager||'')
+    .replace(/\{changes\}/g, changes||'')
+    .replace(/\{gpCount\}/g, String(gpCount!=null?gpCount:''))
+    .replace(/\{gpMax\}/g, String(gpMax!=null?gpMax:''));
+}
+
 function stageSingleShiftChange(empId, empName, date, currentShift, newShift, coMeta){
   closeModal();
   const key = empId+'__'+date;
@@ -13266,7 +13839,22 @@ function stageSingleShiftChange(empId, empName, date, currentShift, newShift, co
 
   // Single-day change only — no auto-fill pattern
 
-  _pendingShiftChanges[key] = { empId, empName, date, newShift, currentShift, coMeta: coMeta||null };
+  // Gate Pass monthly limit (default 2)
+  if(newShift === 'GP'){
+    const cfg = getShiftConfigSync();
+    const gpMax = Math.max(1, Number(cfg.gpMaxPerMonth)||2);
+    const prev = _pendingShiftChanges[key];
+    _pendingShiftChanges[key] = { empId, empName, date, newShift, currentShift, coMeta: coMeta||null };
+    const gpCount = _countGPInMonth(empId, date);
+    if(gpCount > gpMax){
+      if(prev) _pendingShiftChanges[key] = prev;
+      else delete _pendingShiftChanges[key];
+      toast(`⛔ Gate Pass limit: महीने में अधिकतम ${gpMax} GP। ${empName} के पास पहले से limit पूरी है।`);
+      return;
+    }
+  } else {
+    _pendingShiftChanges[key] = { empId, empName, date, newShift, currentShift, coMeta: coMeta||null };
+  }
 
   // Visually mark the cell in the table as pending (orange glow)
   const cellEl = document.querySelector(`td[data-cellkey="${empId}_${date}"]`);

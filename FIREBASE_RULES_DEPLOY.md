@@ -97,3 +97,6 @@ Firebase Console → Authentication → copy manager **UID** → RTDB:
 ```
 managers/<UID>: true
 ```
+
+### holidayLists path (2026-09-25)
+`holidayLists/{companyKey}` — read: any auth user; write: admin phones / admins node / managers node / approved phone manager.
