@@ -993,7 +993,8 @@ function _normSecKey(s){ return (s||'').toString().toUpperCase().replace(/[^A-Z0
 function _buildMachineChips(kind){
   const cfg=getShiftConfigSync();
   const emps=getEmps();
-  const chips=[{code:'ALL',label:_lang==='en'?'All':'सभी'}];
+  const primary=[{code:'ALL',label:_lang==='en'?'All':'सभी'}];
+  const secondary=[];
   const metKeys=new Set((cfg.metallisers||[]).map(_normSecKey));
   const slitKeys=new Set((cfg.slitters||[]).map(_normSecKey));
   const allSecs=Array.from(new Set(emps.map(e=>e.sec).filter(Boolean)));
@@ -1007,21 +1008,73 @@ function _buildMachineChips(kind){
   const known=new Set([...metPoolSecs,...slitPoolSecs,...supSecs,...mgrSecs,...metMachineSecs,...slitMachineSecs]);
   const otherSecs=allSecs.filter(s=>!known.has(s));
 
-  // "Met (All)" / "Slit (All)" umbrella — everyone across that machine type, pool + specific machines combined
-  if(metPoolSecs.length || metMachineSecs.length) chips.push({code:'GRP:metalliser',label:secName('MET')||(_lang==='en'?'Met (All Metalliser)':'Met (सभी Metalliser)')});
-  metMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  if(slitPoolSecs.length || slitMachineSecs.length) chips.push({code:'GRP:slitter',label:secName('SLIT')||(_lang==='en'?'Slit (All Slitter)':'Slit (सभी Slitter)')});
-  slitMachineSecs.sort().forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  otherSecs.forEach(s=>chips.push({code:s,label:secName(s)||s}));
-  if(supSecs.length) chips.push({code:'GRP:supervisor',label:secName('SUP')||(_lang==='en'?'Supervisor / Engineer':'सुपरवाइज़र / Engineer')});
-  if(mgrSecs.length) chips.push({code:'GRP:manager',label:_lang==='en'?'Manager':'Manager'});
-  return chips;
+  if(metPoolSecs.length || metMachineSecs.length)
+    primary.push({code:'GRP:metalliser',label:_lang==='en'?'Metalliser':'मेटलाइज़र'});
+  if(slitPoolSecs.length || slitMachineSecs.length)
+    primary.push({code:'GRP:slitter',label:_lang==='en'?'Slitter':'स्लिटर'});
+  if(supSecs.length)
+    primary.push({code:'GRP:supervisor',label:_lang==='en'?'Supervisor':'सुपरवाइज़र'});
+  if(mgrSecs.length)
+    primary.push({code:'GRP:manager',label:_lang==='en'?'Manager':'मैनेजर'});
+
+  metMachineSecs.sort().forEach(s=>secondary.push({code:s,label:secName(s)||s}));
+  slitMachineSecs.sort().forEach(s=>secondary.push({code:s,label:secName(s)||s}));
+  otherSecs.forEach(s=>secondary.push({code:s,label:secName(s)||s}));
+
+  if(kind==='team'){
+    const all=[...primary];
+    secondary.forEach(c=>{ if(!all.some(x=>x.code===c.code)) all.push(c); });
+    return all;
+  }
+  return { primary, secondary };
 }
 function _renderDynamicChips(containerId, chips, activeCode, clickFnName){
   const el=document.getElementById(containerId);
   if(!el) return;
-  el.innerHTML=chips.map(c=>`<div class="chip${c.code===activeCode?' on':''}" onclick="${clickFnName}('${c.code.replace(/'/g,"\\'")}',this)">${c.label}</div>`).join('');
+  const list = Array.isArray(chips) ? chips : (chips.primary||[]);
+  el.innerHTML=list.map(c=>`<div class="chip${c.code===activeCode?' on':''}" onclick="${clickFnName}('${c.code.replace(/'/g,"\\'")}',this)">${c.label}</div>`).join('');
 }
+function _renderSchedFilterChips(activeCode){
+  const data = _buildMachineChips('sched');
+  const primary = data.primary || data;
+  const secondary = data.secondary || [];
+  _renderDynamicChips('schedFilter', primary, activeCode, 'setSchedSec');
+  const secEl = document.getElementById('schedFilterSecondary');
+  if(!secEl) return;
+  const showSec = secondary.length > 0 && (
+    activeCode === 'GRP:metalliser' || activeCode === 'GRP:slitter' ||
+    secondary.some(c => c.code === activeCode)
+  );
+  if(showSec){
+    let list = secondary;
+    if(activeCode === 'GRP:metalliser') list = secondary.filter(c => /^M/i.test(String(c.code)) || /MET/i.test(String(c.code)));
+    else if(activeCode === 'GRP:slitter') list = secondary.filter(c => /^S/i.test(String(c.code)) || /SLIT/i.test(String(c.code)));
+    secEl.style.display = list.length ? 'flex' : 'none';
+    secEl.innerHTML = list.map(c=>`<div class="chip chip-sm${c.code===activeCode?' on':''}" onclick="setSchedSec('${String(c.code).replace(/'/g,"\\'")}',this)">${c.label}</div>`).join('');
+  } else {
+    secEl.style.display = 'none';
+    secEl.innerHTML = '';
+  }
+}
+function toggleSchedMoreMenu(force){
+  const menu = document.getElementById('schedMoreMenu');
+  const btn = document.getElementById('schedMoreBtn');
+  if(!menu) return;
+  const open = force === false ? false : force === true ? true : menu.style.display === 'none';
+  menu.style.display = open ? 'block' : 'none';
+  if(btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+document.addEventListener('click', function(e){
+  const wrap = document.getElementById('schedMoreWrap');
+  if(wrap && !wrap.contains(e.target)) try{ toggleSchedMoreMenu(false); }catch(x){}
+});
+function _mpSchedShortcuts(e){
+  if(!document.getElementById('tab-schedule')||!document.getElementById('tab-schedule').classList.contains('on')) return;
+  if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  if(e.key==='n' && !e.ctrlKey && !e.metaKey && typeof openScheduleBuilder==='function' && typeof canEditSchedule==='function' && canEditSchedule()) openScheduleBuilder();
+  if((e.key==='p'||e.key==='P') && !e.ctrlKey && !e.metaKey && typeof printSched==='function') printSched();
+}
+document.addEventListener('keydown', _mpSchedShortcuts);
 
 let _shiftConfigCache={};
 async function getShiftConfig(keyOverride){
@@ -1111,9 +1164,7 @@ function applyLang(){
 
   // Sync row
   const syncLbl = document.getElementById('syncLabel');
-  if(syncLbl) syncLbl.textContent = isEn
-    ? '🔄 Live Sync · Last Update:'
-    : '🔄 लाइव सिंक · अंतिम अपडेट:';
+  if(syncLbl) syncLbl.textContent = isEn ? 'Live' : 'लाइव';
 
   // Section status heading
   const secTitle = document.getElementById('homeSectionTitle');
@@ -5173,7 +5224,7 @@ function clearMultiSelect(){
   const bar = document.getElementById('multiSelectBar');
   if(bar) bar.style.display = 'none';
   const btn = document.getElementById('msToggleBtn');
-  if(btn){ btn.style.background='rgba(167,139,250,.06)'; btn.style.borderColor='rgba(167,139,250,.4)'; btn.textContent='☑️ Multi-Select'; }
+  if(btn){ btn.classList.remove('ms-on'); btn.style.background='rgba(167,139,250,.06)'; btn.style.borderColor='rgba(167,139,250,.4)'; btn.textContent=(_lang==='en')?'☑️ Multi-Select':'☑️ Multi-Select'; }
 }
 
 function toggleSelectMode(){
@@ -5181,8 +5232,13 @@ function toggleSelectMode(){
   if(_msActive){ clearMultiSelect(); return; }
   _msActive = true;
   const btn = document.getElementById('msToggleBtn');
-  if(btn){ btn.style.background='rgba(167,139,250,.25)'; btn.style.borderColor='#a78bfa'; btn.textContent='✕ Cancel Select'; }
-  toast('☑️ Select Mode ON — cells tap करें, फिर shift चुनें');
+  if(btn){
+    btn.classList.add('ms-on');
+    btn.style.background='rgba(167,139,250,.35)';
+    btn.style.borderColor='#a78bfa';
+    btn.textContent=(_lang==='en')?'✕ Cancel Select':'✕ Cancel Select';
+  }
+  toast('☑️ Select Mode ON — tap cells, then choose shift');
   _msAttachEvents();
 }
 
@@ -5425,8 +5481,11 @@ function moveW(n){
 }
 function setSchedSec(s,el){
   schedSec=s;
-  document.querySelectorAll('#schedFilter .chip').forEach(c=>c.classList.remove('on'));
-  el.classList.add('on'); renderSchedule(); setTimeout(syncStickyTop,80);
+  document.querySelectorAll('#schedFilter .chip, #schedFilterSecondary .chip').forEach(c=>c.classList.remove('on'));
+  if(el) el.classList.add('on');
+  _renderSchedFilterChips(schedSec);
+  renderSchedule();
+  setTimeout(syncStickyTop,80);
 }
 function renderScheduleLegend(){
   const el=document.getElementById('schedLegend');
@@ -5452,7 +5511,7 @@ function renderScheduleLegend(){
 }
 
 function renderSchedule(){
-  _renderDynamicChips('schedFilter', _buildMachineChips('sched'), schedSec, 'setSchedSec');
+  _renderSchedFilterChips(schedSec);
   renderScheduleLegend();
   const _d1=new Date(TODAY_STR+'T00:00:00'); _d1.setFullYear(_d1.getFullYear()-1);
   const _d2=new Date(TODAY_STR+'T00:00:00'); _d2.setFullYear(_d2.getFullYear()+1);
