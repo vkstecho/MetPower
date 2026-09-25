@@ -19891,7 +19891,7 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
 // ════════════════════════════════════════
 function initPWA(){
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=20260925b').then(reg=>{
+    navigator.serviceWorker.register('/sw.js?v=20260925c').then(reg=>{
       console.log('SW registered:', reg.scope);
       let _swUpdating = false;
       reg.addEventListener('updatefound', () => {

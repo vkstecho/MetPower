@@ -1,14 +1,21 @@
 {
+  "id": "/",
   "name": "MET Power",
   "short_name": "MET Power",
   "description": "MET Power Metalliser department manpower & shift management",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "portrait-primary",
   "background_color": "#0a0f1a",
   "theme_color": "#f97316",
-  "lang": "hi-IN",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.png",
@@ -28,6 +35,5 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ],
-  "id": "/"
+  ]
 }
