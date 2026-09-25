@@ -1,9 +1,9 @@
 {
-  "name": "MET Power — Manpower System",
+  "name": "MET Power",
   "short_name": "MET Power",
   "description": "GLS Polyfilms Metalliser department manpower & shift management",
-  "start_url": "./index.html",
-  "scope": "./",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0a0f1a",
@@ -11,16 +11,23 @@
   "lang": "hi-IN",
   "icons": [
     {
-      "src": "vkslogo512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "vkslogo512.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "id": "/"
 }

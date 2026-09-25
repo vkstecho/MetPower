@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <html lang="hi" translate="no">
 <head>
+
+<!-- Capture install prompt BEFORE any other script (critical for Android/Desktop Chrome) -->
+<script>
+window.__pwaDeferredPrompt = null;
+window.__pwaInstallReady = false;
+window.addEventListener('beforeinstallprompt', function (e) {
+  e.preventDefault();
+  window.__pwaDeferredPrompt = e;
+  window.__pwaInstallReady = true;
+  try {
+    if (typeof window._onPwaPromptReady === 'function') window._onPwaPromptReady(e);
+  } catch (err) {}
+});
+window.addEventListener('appinstalled', function () {
+  window.__pwaDeferredPrompt = null;
+  window.__pwaInstallReady = false;
+});
+</script>
+
 <meta charset="UTF-8">
   <meta name="google" content="notranslate">
   <meta name="translate" content="no">

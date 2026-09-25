@@ -1,5 +1,5 @@
 /* MET Power — minimal service worker (installability + offline shell) */
-const CACHE = 'metpower-v1';
+const CACHE = 'metpower-v2';
 const PRECACHE = [
   './',
   './index.html',

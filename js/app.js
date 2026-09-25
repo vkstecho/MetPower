@@ -17893,62 +17893,44 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
 // ════════════════════════════════════════
 // PWA — Install + Service Worker
 // ════════════════════════════════════════
-let _pwaPrompt = null;
-
 function initPWA(){
-  // Register service worker
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js?v=1773122811').then(reg=>{
+    navigator.serviceWorker.register('./sw.js?v=20260925b').then(reg=>{
       console.log('SW registered:', reg.scope);
-
-      // ── Auto-update detection ──
-      // Only reload when a genuinely NEW version is detected (not on PTR)
       let _swUpdating = false;
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if(!newWorker) return;
         newWorker.addEventListener('statechange', () => {
-          // 'installed' + existing controller = real new version available
           if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
             _swUpdating = true;
-            newWorker.postMessage('SKIP_WAITING');
+            try{ newWorker.postMessage('SKIP_WAITING'); }catch(e){}
             try{ toast('🔄 नया version मिला — refresh हो रहा है...'); }catch(e){}
             setTimeout(() => { if(_swUpdating) window.location.reload(); }, 2500);
           }
         });
       });
-
-      // Periodic check — delayed 60s so page fully boots first
-      setTimeout(() => { setInterval(() => { reg.update(); }, 15 * 60 * 1000); }, 60000);
-
+      setTimeout(() => { try{ setInterval(() => { reg.update(); }, 15 * 60 * 1000); }catch(e){} }, 60000);
     }).catch(e=> console.log('SW error:', e));
-
-    // controllerchange: ONLY reload if our update flow triggered it
-    // DO NOT unconditionally reload — that causes PTR black screen loop
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      // Intentional no-op for PTR case; _swUpdating handles real updates above
-    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {});
   }
-
-  // Show install button if NOT already running as installed PWA
-  _mpRefreshInstallButtons();
-
-  // Capture install prompt as early as possible (Android Chrome / Edge)
-  window.addEventListener('beforeinstallprompt', e=>{
-    e.preventDefault();
-    _pwaPrompt = e;
-    _mpRefreshInstallButtons();
-    showInstallBanner();
-  });
-
-  // Installed
-  window.addEventListener('appinstalled', ()=>{
-    hideInstallBanner();
-    toast('🎉 App install हो गई! Home screen पर देखें');
-    _pwaPrompt = null;
-    _mpRefreshInstallButtons();
-  });
+  try{ _mpInitInstallUi(); }catch(e){ console.warn('install UI', e); }
 }
+
+let _pwaPrompt = null;
+
+/** Sync deferred prompt from early <head> capture */
+function _mpSyncPwaPrompt(){
+  if(window.__pwaDeferredPrompt){
+    _pwaPrompt = window.__pwaDeferredPrompt;
+  }
+  return _pwaPrompt;
+}
+
+window._onPwaPromptReady = function(e){
+  _pwaPrompt = e || window.__pwaDeferredPrompt;
+  try{ _mpRefreshInstallButtons(); }catch(x){}
+};
 
 function _mpIsPwaInstalled(){
   return window.matchMedia('(display-mode: standalone)').matches
@@ -17974,91 +17956,117 @@ function hideInstallBanner(){
 }
 
 /**
- * Tap Install → native install dialog when browser allows it.
- * If prompt not ready yet, wait briefly for beforeinstallprompt then retry.
+ * Tap Install → native browser install dialog.
+ * Uses early-captured beforeinstallprompt when available.
  */
 async function triggerPWAInstall(){
-  if(window._pwaPrompt && !_pwaPrompt) _pwaPrompt = window._pwaPrompt;
+  _mpSyncPwaPrompt();
+
   if(_mpIsPwaInstalled()){
     toast('✅ App पहले से installed है!');
     _mpRefreshInstallButtons();
     return;
   }
 
-  // Wait up to ~2s for browser to fire beforeinstallprompt (first visit)
+  // Wait a bit if event not yet received (slow SW / first load)
   if(!_pwaPrompt){
     toast('⏳ Install तैयार हो रहा है...');
-    await new Promise(r => {
-      let done = false;
-      const finish = () => { if(!done){ done = true; r(); } };
-      const t = setTimeout(finish, 2000);
-      const once = (e) => {
-        e.preventDefault();
-        _pwaPrompt = e;
-        clearTimeout(t);
-        finish();
-      };
-      window.addEventListener('beforeinstallprompt', once, { once: true });
-    });
+    for(let i = 0; i < 20 && !_pwaPrompt; i++){
+      await new Promise(r => setTimeout(r, 150));
+      _mpSyncPwaPrompt();
+    }
   }
 
   if(_pwaPrompt){
     try{
-      _pwaPrompt.prompt();
-      const result = await _pwaPrompt.userChoice;
-      if(result.outcome === 'accepted'){
+      const promptEvent = _pwaPrompt;
+      await promptEvent.prompt();
+      const result = await promptEvent.userChoice;
+      if(result && result.outcome === 'accepted'){
         toast('✅ App install हो रही है...');
         _pwaPrompt = null;
+        window.__pwaDeferredPrompt = null;
         _mpRefreshInstallButtons();
         hideInstallBanner();
       } else {
-        toast('Install रद्द किया');
-        // Keep prompt discarded after userChoice — browser won't reuse it
+        toast('Install रद्द किया — ऊपर address bar में Install भी try करें');
+        // Event can only be used once
         _pwaPrompt = null;
+        window.__pwaDeferredPrompt = null;
       }
       return;
     }catch(err){
       console.warn('[PWA] prompt failed', err);
       _pwaPrompt = null;
+      window.__pwaDeferredPrompt = null;
     }
   }
 
-  // Fallback: manual steps (iOS / browsers without beforeinstallprompt)
+  // No deferred prompt — Chrome often still shows Install in the address bar
   _showInstallInstructions();
 }
 
 function _showInstallInstructions(){
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isSamsung = /SamsungBrowser/i.test(navigator.userAgent);
-    const isInstalled = window.matchMedia('(display-mode: standalone)').matches
-                     || window.navigator.standalone === true;
-    if(isInstalled){
-      toast('✅ App पहले से installed है! Home screen पर देखें।');
-      return;
-    }
-    if(isIOS){
-      openModal(`<div class="modal-handle"></div>
-        <div class="modal-title">📲 iPhone पर Install करें</div>
-        <div style="font-size:14px;line-height:2;color:var(--muted2)">
-          <div>1️⃣ Safari browser में यह page खोलें</div>
-          <div>2️⃣ नीचे <b style="color:#fff">Share 📤</b> button दबाएं</div>
-          <div>3️⃣ <b style="color:#fff">"Add to Home Screen"</b> चुनें</div>
-          <div>4️⃣ <b style="color:#fff">Add</b> दबाएं</div>
-        </div>
-        <button class="cancel-btn" onclick="closeModal()" style="margin-top:16px">ठीक है</button>`);
-    } else {
-      openModal(`<div class="modal-handle"></div>
-        <div class="modal-title">📲 App Install करें</div>
-        <div style="font-size:14px;line-height:2;color:var(--muted2)">
-          <div>1️⃣ Chrome browser में यह page खोलें</div>
-          <div>2️⃣ ऊपर right में <b style="color:#fff">⋮ (3 dots)</b> दबाएं</div>
-          <div>3️⃣ <b style="color:#fff">"Add to Home Screen"</b> चुनें</div>
-          <div>4️⃣ <b style="color:#fff">Install / Add</b> दबाएं</div>
-        </div>
-        <button class="cancel-btn" onclick="closeModal()" style="margin-top:16px">ठीक है</button>`);
-    }
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isInstalled = _mpIsPwaInstalled();
+  if(isInstalled){
+    toast('✅ App पहले से installed है! Home screen पर देखें।');
+    return;
+  }
+  if(isIOS){
+    openModal(`<div class="modal-handle"></div>
+      <div class="modal-title">📲 iPhone पर Install करें</div>
+      <div style="font-size:14px;line-height:2;color:var(--muted2)">
+        <div>1️⃣ <b style="color:#fff">Safari</b> में यह page खोलें</div>
+        <div>2️⃣ नीचे <b style="color:#fff">Share 📤</b> दबाएं</div>
+        <div>3️⃣ <b style="color:#fff">Add to Home Screen</b> चुनें</div>
+        <div>4️⃣ <b style="color:#fff">Add</b> दबाएं</div>
+      </div>
+      <button class="cancel-btn" onclick="closeModal()" style="margin-top:16px">ठीक है</button>`);
+    return;
+  }
+  // Desktop / Android Chrome — point to browser Install chip (visible in address bar)
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">📲 App Install करें</div>
+    <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:12px;padding:14px;margin-bottom:14px">
+      <div style="font-size:14px;font-weight:800;color:#22c55e;margin-bottom:6px">⚡ सबसे आसान तरीका</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.6">
+        Browser के <b>ऊपर address bar</b> में <b style="color:#f97316">Install</b> बटन दिख रहा है —<br>
+        उसी पर एक बार टैप / क्लिक करें।
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--muted2);line-height:1.9">
+      <b style="color:#fff">अगर Install नहीं दिखे:</b><br>
+      1️⃣ Chrome menu <b>⋮</b> (ऊपर right)<br>
+      2️⃣ <b>Install app</b> / <b>Add to Home screen</b><br>
+      3️⃣ <b>Install</b> दबाएं
+    </div>
+    <button class="submit-btn" onclick="closeModal();_mpRetryInstall()" style="margin-top:16px">🔄 फिर से Try करें</button>
+    <button class="cancel-btn" onclick="closeModal()" style="margin-top:8px">ठीक है</button>`);
 }
 
+function _mpRetryInstall(){
+  setTimeout(()=>{ try{ triggerPWAInstall(); }catch(e){} }, 300);
+}
+
+// Wire install UI when PWA bootstrap runs
+function _mpInitInstallUi(){
+  _mpSyncPwaPrompt();
+  _mpRefreshInstallButtons();
+  window.addEventListener('beforeinstallprompt', e=>{
+    e.preventDefault();
+    _pwaPrompt = e;
+    window.__pwaDeferredPrompt = e;
+    showInstallBanner();
+  });
+  window.addEventListener('appinstalled', ()=>{
+    hideInstallBanner();
+    toast('🎉 App install हो गई! Home screen पर देखें');
+    _pwaPrompt = null;
+    window.__pwaDeferredPrompt = null;
+    _mpRefreshInstallButtons();
+  });
+}
 
 // ════════════════════════════════════════
 // AI COMMAND CHAT
