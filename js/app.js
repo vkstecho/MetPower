@@ -2579,9 +2579,15 @@ async function _submitPwLogin(empId, empName, deviceId){
 
   const accessLevel=emp.accessLevel||'worker';
   const isMgrRole=accessLevel==='manager'||emp.sec==='MGR'||emp.empId==='30000463';
+  // Resolve manager mobile: emp profile → known Vivek contact → empty
+  let mgrMobile = String(emp.phone || emp.mobile || '').replace(/\D/g,'');
+  if(mgrMobile.length !== 10 && isMgrRole && (emp.empId==='30000463' || (emp.name||'').toUpperCase().includes('VIVEK'))){
+    mgrMobile = String(CFG.contactVivek||'').replace(/\D/g,'').slice(-10);
+  }
   SESSION={role:isMgrRole?'manager':'worker',name:emp.name||empName,empId:emp.empId||empId,
            empObjId:emp.id||empId,dept:emp.sec||'MET',company:'GLS',deviceId,
            accessLevel,loginAt:new Date().toISOString()};
+  if(isMgrRole && mgrMobile.length===10) SESSION.mobile = mgrMobile;
   writeIntegrityToken();
   saveSession();
   toast('✅ Login हो गया! Welcome '+emp.name);
@@ -9370,32 +9376,94 @@ async function doPermDelete(id, name){
 // ── Manager: delete ALL team members (OTP verified) ──
 let _deleteAllConfirmResult = null;
 let _deleteAllInProgress = false;
+let _deleteAllMobile = ''; // mobile used for this OTP session
+
+/** Resolve a 10-digit manager mobile from SESSION / emp / known contacts */
+function _resolveManagerMobile(){
+  let m = String(SESSION.mobile||'').replace(/\D/g,'');
+  if(m.length === 10) return m;
+  try{
+    const emp = myEmp();
+    if(emp){
+      m = String(emp.phone || emp.mobile || '').replace(/\D/g,'');
+      if(m.length === 10) return m;
+    }
+  }catch(e){}
+  // Known Production Manager Vivek
+  if(SESSION.empId==='30000463' || (SESSION.name||'').toUpperCase().includes('VIVEK')){
+    m = String(CFG.contactVivek||'').replace(/\D/g,'').slice(-10);
+    if(m.length === 10) return m;
+  }
+  return '';
+}
 
 async function startDeleteAllMembersFlow(){
-  if(SESSION.role !== 'manager'){ toast('⚠️ Only Manager can do this'); return; }
+  if(SESSION.role !== 'manager' && !isMgr()){ toast('⚠️ Only Manager can do this'); return; }
   const team = getEmps().filter(e => e.status !== 'left' && e.status !== 'resigned');
   if(!team.length){ toast('ℹ️ No team members to delete'); return; }
+
+  let mobile = _resolveManagerMobile();
+
+  // If still no mobile — ask manager to enter it
+  if(mobile.length !== 10){
+    openModal(`<div class="modal-handle"></div>
+      <div class="modal-title">📱 Mobile Required for OTP</div>
+      <div style="font-size:13px;color:var(--muted2);margin-bottom:14px;line-height:1.5">
+        Profile पर mobile number नहीं मिला। OTP भेजने के लिए अपना 10-digit mobile डालें।
+        यह number session में save हो जाएगा।
+      </div>
+      <div class="field">
+        <label>Manager Mobile (10 digits)</label>
+        <input type="tel" id="delAllMobileInput" maxlength="10" inputmode="numeric" placeholder="10 digit mobile"
+          style="width:100%;font-size:18px;font-weight:800;letter-spacing:2px;text-align:center"
+          oninput="this.value=this.value.replace(/\\D/g,'').slice(0,10)">
+      </div>
+      <button class="submit-btn" style="margin-top:12px;background:#e11d48" onclick="_proceedDeleteAllWithEnteredMobile()">📲 Continue — Send OTP</button>
+      <button class="cancel-btn" style="margin-top:8px" onclick="closeModal()">Cancel</button>`);
+    return;
+  }
 
   const ok = await confirmModal(
     '⚠️ Delete entire team?',
     `This will permanently remove <b style="color:#f43f5e">${team.length} members</b> from your team and clear their data from Team list.<br><br>
-     <b>Next step:</b> OTP will be sent to your registered mobile <b>${SESSION.mobile||'—'}</b>.`,
+     <b>Next step:</b> OTP will be sent to your registered mobile <b>+91-${mobile}</b>.`,
     '📲 Continue — Send OTP',
     'Cancel',
     'big-btn red'
   );
   if(!ok) return;
 
-  const mobile = String(SESSION.mobile||'').replace(/\D/g,'');
-  if(mobile.length !== 10){
-    toast('⚠️ Manager mobile not found on profile — cannot send OTP');
-    return;
+  _deleteAllMobile = mobile;
+  // Persist to session if it was resolved from fallback
+  if(!SESSION.mobile || String(SESSION.mobile).replace(/\D/g,'').length !== 10){
+    SESSION.mobile = mobile;
+    try{ saveSession(); }catch(e){}
   }
+  await _openDeleteAllOtpModal(team.length, mobile);
+}
 
+async function _proceedDeleteAllWithEnteredMobile(){
+  const mobile = String(document.getElementById('delAllMobileInput')?.value||'').replace(/\D/g,'');
+  if(mobile.length !== 10){ toast('⚠️ 10 अंकों का valid mobile डालें'); return; }
+  const team = getEmps().filter(e => e.status !== 'left' && e.status !== 'resigned');
+  _deleteAllMobile = mobile;
+  SESSION.mobile = mobile;
+  try{ saveSession(); }catch(e){}
+  // Best-effort: update employee record phone
+  try{
+    if(SESSION.empObjId){
+      await fbUpdate('employees/'+SESSION.empObjId, { phone: mobile, mobile: mobile });
+    }
+  }catch(e){ console.warn('Could not save mobile to emp profile', e); }
+  closeModal();
+  await _openDeleteAllOtpModal(team.length, mobile);
+}
+
+async function _openDeleteAllOtpModal(teamCount, mobile){
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">🔐 OTP Verify — Delete All Members</div>
     <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.5">
-      OTP will be sent to <b style="color:var(--text)">+91-${mobile}</b>. Enter it below to confirm deletion of <b style="color:#f43f5e">${team.length}</b> members.
+      OTP will be sent to <b style="color:var(--text)">+91-${mobile}</b>. Enter it below to confirm deletion of <b style="color:#f43f5e">${teamCount}</b> members.
     </div>
     <div id="delAllStatus" style="font-size:12px;color:#f59e0b;margin-bottom:10px">⏳ Sending OTP…</div>
     <div class="field">
@@ -9423,7 +9491,7 @@ async function startDeleteAllMembersFlow(){
 }
 
 async function _resendDeleteAllOtp(){
-  const mobile = String(SESSION.mobile||'').replace(/\D/g,'');
+  const mobile = _deleteAllMobile || _resolveManagerMobile();
   if(mobile.length!==10){ toast('⚠️ Manager mobile missing'); return; }
   const st = document.getElementById('delAllStatus');
   if(st) st.textContent = '⏳ Resending OTP…';
@@ -9439,6 +9507,7 @@ async function _resendDeleteAllOtp(){
 
 function _cancelDeleteAllFlow(){
   _deleteAllConfirmResult = null;
+  _deleteAllMobile = '';
   try{ if(window._fbRecaptchaDelAll){ window._fbRecaptchaDelAll.clear(); window._fbRecaptchaDelAll=null; } }catch(e){}
   closeModal();
 }
@@ -9468,7 +9537,7 @@ async function _confirmDeleteAllWithOtp(){
   if(st) st.textContent = '⏳ Deleting members…';
   const team = getEmps();
   let removed = 0, failed = 0;
-  const mgrKey = SESSION.mobile ? _normMobileKey(SESSION.mobile) : '';
+  const mgrKey = (_deleteAllMobile || SESSION.mobile) ? _normMobileKey(_deleteAllMobile || SESSION.mobile) : '';
 
   for(const emp of team){
     try{
@@ -9507,6 +9576,7 @@ async function _confirmDeleteAllWithOtp(){
 
   _deleteAllConfirmResult = null;
   _deleteAllInProgress = false;
+  _deleteAllMobile = '';
   try{ if(window._fbRecaptchaDelAll){ window._fbRecaptchaDelAll.clear(); window._fbRecaptchaDelAll=null; } }catch(e){}
   closeModal();
   toast(`🗑️ Deleted ${removed} members` + (failed ? `, ${failed} failed` : ''));
