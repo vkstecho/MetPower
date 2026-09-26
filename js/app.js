@@ -5214,7 +5214,7 @@ async function renderHome(){
     TODAY_DATE.toLocaleDateString(_lang==='en'?'en-IN':'hi-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
   if(isAdminOrMgr()){
-    // ── ADMIN/MANAGER: full team overview ──
+    // ── ADMIN/MANAGER: Metalliser + Slitter summary + named manpower lists ──
     document.getElementById('homeAdminView').style.display='block';
     document.getElementById('homeWorkerView').style.display='none';
     document.getElementById('homeNotice').innerHTML='';
@@ -5228,44 +5228,124 @@ async function renderHome(){
       <div class="stat-card"><div class="stat-val" style="color:var(--night)">${nE}</div><div class="stat-lbl" id="nightStatLbl">${_lang==='en'?'Night Shift':'रात शिफ्ट'}</div></div>
       <div class="stat-card"><div class="stat-val" style="color:var(--lv)">${lvE}</div><div class="stat-lbl" id="leaveStatLbl">${_lang==='en'?'On Leave':'छुट्टी पर'}</div></div>`;
 
-    document.getElementById('homeSections').innerHTML = Object.entries(SEC).map(([k,s])=>{
-      const members=emps.filter(e=>e.sec===k && e.status!=='resigned');
-      const todayShifts = members.map(e=>getShift(e,TODAY_STR));
-      const dayCount = todayShifts.filter(s=>s==='D'||s==='G'||s==='GP').length;
-      const nightCount = todayShifts.filter(s=>s==='N').length;
-      const duty = dayCount + nightCount;
-      const min = s.type==='metalliser'?CFG.minShift.metalliser : s.type==='slitter'?CFG.minShift.slitter:0;
-      const warn = min>0 && duty<min;
-      return `<div class="sec-card" style="${warn?'border-color:rgba(244,63,94,.4);':''}">
+    // Aggregate Metalliser (M1+M2) and Slitter (S1+S2) — not per-machine
+    const isMet = e => { const t=(SEC[e.sec]||{}).type; return t==='metalliser' || ['M1','M2','MET'].includes(String(e.sec||'').toUpperCase()); };
+    const isSlit= e => { const t=(SEC[e.sec]||{}).type; return t==='slitter'    || ['S1','S2','SLIT'].includes(String(e.sec||'').toUpperCase()); };
+    const isEng = e => {
+      const t=(SEC[e.sec]||{}).type;
+      if(t==='sup' || t==='mgr') return true;
+      const s=String(e.sec||'').toUpperCase();
+      if(s==='SUP'||s==='ALL'||s==='MGR') return true;
+      const role=(getEmpRole(e).role||'');
+      if(role==='sup_met'||role==='sup_slit'||role==='mgr') return true;
+      const des=(e.designation||'').toLowerCase();
+      if(des.includes('engineer')||des.includes('supervisor')||des.includes('get')) return true;
+      return false;
+    };
+    const onDuty = sh => isWorking(sh) || sh==='D' || sh==='N' || sh==='G' || sh==='GP';
+    const isDay  = sh => sh==='D' || sh==='G' || sh==='GP';
+    const isNight= sh => sh==='N';
+
+    const metEmps  = emps.filter(isMet);
+    const slitEmps = emps.filter(isSlit);
+    const engEmps  = emps.filter(isEng);
+
+    const metDay   = metEmps.filter(e=>isDay(getShift(e,TODAY_STR)));
+    const metNight = metEmps.filter(e=>isNight(getShift(e,TODAY_STR)));
+    const slitDay  = slitEmps.filter(e=>isDay(getShift(e,TODAY_STR)));
+    const slitNight= slitEmps.filter(e=>isNight(getShift(e,TODAY_STR)));
+    const engToday = engEmps.filter(e=>onDuty(getShift(e,TODAY_STR)));
+
+    const metDuty  = metDay.length + metNight.length;
+    const slitDuty = slitDay.length + slitNight.length;
+    const metMin   = (CFG.minShift && CFG.minShift.metalliser) || 0;
+    const slitMin  = (CFG.minShift && CFG.minShift.slitter) || 0;
+    const metWarn  = metMin>0 && metDuty<metMin;
+    const slitWarn = slitMin>0 && slitDuty<slitMin;
+
+    const en = _lang==='en';
+    // Top summary cards: Metalliser (all) + Slitter (all) — no M-1/M-2/S-1/S-2 split
+    document.getElementById('homeSectionTitle').textContent = en
+      ? "Today's Shift — Metalliser & Slitter"
+      : 'आज की शिफ्ट — Metalliser & Slitter';
+
+    document.getElementById('homeSections').innerHTML = `
+      <div class="sec-card" style="${metWarn?'border-color:rgba(244,63,94,.4);':''}">
         <div style="display:flex;align-items:center;gap:12px">
-          <div class="sec-icon" style="background:${s.bg}">${s.icon}</div>
+          <div class="sec-icon" style="background:var(--m1bg)">🏭</div>
           <div>
-            <div class="sec-name" style="color:${s.color}">${_lang==='en'?s.label:s.hi}${warn?'<span class="warning-dot" style="margin-left:6px"></span>':''}</div>
-            <div class="sec-machine">${s.machine}</div>
+            <div class="sec-name" style="color:var(--m1)">${en?'Metalliser (All)':'Metalliser (सभी)'}${metWarn?'<span class="warning-dot" style="margin-left:6px"></span>':''}</div>
+            <div class="sec-machine">M-1 · M-2</div>
           </div>
         </div>
         <div>
-          <div class="sec-count" style="color:${warn?'var(--lv)':s.color}">${duty}/${members.length}</div>
-          <div class="sec-count-lbl" style="font-size:10px">${warn?(_lang==='en'?'⚠️ Low':'⚠️ कम'):(_lang==='en'?'Duty':'ड्यूटी')} <span style="color:var(--day)">${dayCount}D</span> <span style="color:var(--night)">${nightCount}N</span></div>
+          <div class="sec-count" style="color:${metWarn?'var(--lv)':'var(--m1)'}">${metDuty}/${metEmps.length}</div>
+          <div class="sec-count-lbl" style="font-size:10px">${metWarn?(en?'⚠️ Low':'⚠️ कम'):(en?'Duty':'ड्यूटी')} <span style="color:var(--day)">${metDay.length}D</span> <span style="color:var(--night)">${metNight.length}N</span></div>
         </div>
-      </div>`;
-    }).join('');
-
-    document.getElementById('homeRoster').innerHTML = emps.slice(0,10).map(e=>{
-      const sh=getShift(e,TODAY_STR); const isMe=e.id===SESSION.empObjId;
-      return `<div class="card" style="${isMe?'border-color:rgba(249,115,22,.4);background:rgba(249,115,22,.04);':''}">
-        <div class="card-row">
-          <div style="flex:1">
-            <div class="card-name">${e.name}${isMe?' <span style="font-size:10px;color:var(--m1)">(आप)</span>':''}</div>
-            <div class="card-sub">${secName(e.sec)} · ${e.empId||'—'}</div>
+      </div>
+      <div class="sec-card" style="${slitWarn?'border-color:rgba(244,63,94,.4);':''}">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="sec-icon" style="background:var(--s1bg)">✂️</div>
+          <div>
+            <div class="sec-name" style="color:var(--s1)">${en?'Slitter (All)':'Slitter (सभी)'}${slitWarn?'<span class="warning-dot" style="margin-left:6px"></span>':''}</div>
+            <div class="sec-machine">S-1 · S-2</div>
           </div>
-          <span class="shc ${cellClass(sh)}">${cellDisp(sh)}</span>
+        </div>
+        <div>
+          <div class="sec-count" style="color:${slitWarn?'var(--lv)':'var(--s1)'}">${slitDuty}/${slitEmps.length}</div>
+          <div class="sec-count-lbl" style="font-size:10px">${slitWarn?(en?'⚠️ Low':'⚠️ कम'):(en?'Duty':'ड्यूटी')} <span style="color:var(--day)">${slitDay.length}D</span> <span style="color:var(--night)">${slitNight.length}N</span></div>
         </div>
       </div>`;
-    }).join('') + `<div onclick="goTab('schedule')" style="text-align:center;padding:12px;font-size:13px;color:var(--muted);cursor:pointer">पूरा शेड्यूल देखें →</div>`;
+
+    // Named manpower lists
+    function _nameChip(emp, sh){
+      const role=getEmpRole(emp);
+      const isMain=role.role==='main';
+      const isSup=role.role==='sup_met'||role.role==='sup_slit';
+      const border=isMain?'rgba(249,115,22,.45)':isSup?'rgba(168,85,247,.45)':'rgba(255,255,255,.1)';
+      const bg=isMain?'rgba(249,115,22,.08)':isSup?'rgba(168,85,247,.08)':'rgba(255,255,255,.04)';
+      const badge=isMain?'<span style="font-size:8px;color:#f97316;font-weight:900">MAIN</span>'
+                 :isSup?'<span style="font-size:8px;color:#a855f7;font-weight:900">SUP</span>':'';
+      const shLabel = sh?`<span class="shc ${cellClass(sh)}" style="width:22px;height:18px;font-size:10px;margin-left:4px">${cellDisp(sh)}</span>`:'';
+      return `<div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:8px 10px;min-width:0">
+        <div style="font-size:14px;font-weight:800;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${emp.name}</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap">
+          <span style="font-size:11px;color:#64748b">${emp.mc||secName(emp.sec)||'—'}</span>
+          ${badge}${shLabel}
+        </div>
+      </div>`;
+    }
+    function _groupBlock(title, icon, color, list, emptyMsg){
+      const chips = list.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${list.map(e=>_nameChip(e,getShift(e,TODAY_STR))).join('')}</div>`
+        : `<div style="font-size:12px;color:#64748b;padding:6px 0">${emptyMsg}</div>`;
+      return `<div style="background:#0f172a;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px 14px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:16px">${icon}</span>
+          <span style="font-size:14px;font-weight:800;color:${color};flex:1">${title}</span>
+          <span style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:${color}">${list.length}</span>
+        </div>
+        ${chips}
+      </div>`;
+    }
+
+    const rosterHtml =
+      _groupBlock(en?'Day Shift — Metalliser':'दिन शिफ्ट — Metalliser', '☀️', '#f59e0b', metDay,   en?'No one on day metalliser':'दिन Metalliser पर कोई नहीं') +
+      _groupBlock(en?'Day Shift — Slitter':'दिन शिफ्ट — Slitter',       '☀️', '#38bdf8', slitDay,  en?'No one on day slitter':'दिन Slitter पर कोई नहीं') +
+      _groupBlock(en?'Night Shift — Metalliser':'रात शिफ्ट — Metalliser','🌙', '#818cf8', metNight, en?'No one on night metalliser':'रात Metalliser पर कोई नहीं') +
+      _groupBlock(en?'Night Shift — Slitter':'रात शिफ्ट — Slitter',      '🌙', '#a78bfa', slitNight,en?'No one on night slitter':'रात Slitter पर कोई नहीं') +
+      _groupBlock(en?'Engineers Today':'आज के Engineers / Supervisors',  '👷', '#c084fc', engToday, en?'No engineers on duty today':'आज कोई Engineer duty पर नहीं');
+
+    // Update roster title
+    const rosterTitle = document.querySelector('#homeAdminView .stitle:last-of-type') || document.querySelector('#homeAdminView .stitle + #homeRoster');
+    // Set via homeRoster content with a heading inside
+    document.getElementById('homeRoster').innerHTML =
+      `<div class="stitle" style="margin-top:4px">${en?'Manpower on Duty — Names':'ड्यूटी पर Manpower — नाम'}</div>` +
+      rosterHtml +
+      `<div onclick="goTab('schedule')" style="text-align:center;padding:12px;font-size:13px;color:var(--muted);cursor:pointer">${en?'View full schedule →':'पूरा शेड्यूल देखें →'}</div>`;
 
   } else {
-    // ── WORKER: personal shift calendar ──
+    // ── WORKER / INDIVIDUAL: Previous 3 days + Upcoming 7 days shift calendar ──
     document.getElementById('homeAdminView').style.display='none';
     document.getElementById('homeWorkerView').style.display='block';
 
@@ -5274,11 +5354,9 @@ async function renderHome(){
       document.getElementById('homeWorkerView').innerHTML='<div class="empty"><div class="empty-icon">👤</div><div class="empty-text">प्रोफाइल नहीं मिली</div></div>';
       return;
     }
-    const s=SEC[e.sec]||SEC.M1;
     const todaySh=getShift(e,TODAY_STR);
-    const tmrwSh=getShift(e,addDays(TODAY_STR,1));
 
-    // ── VALIDITY — warn via toast only if critical ──
+    // Validity warning
     try{
       const approval = await fbGet('deviceApprovals/' + e.id);
       if(approval && approval.validTill){
@@ -5290,129 +5368,111 @@ async function renderHome(){
       }
     }catch(e2){}
 
-    // Full calendar for current month
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month+1, 0);
-    const startDow = firstDay.getDay(); // 0=Sun
-    const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-    const monthName = now.toLocaleDateString(_lang==='en'?'en-IN':'hi-IN',{month:'long',year:'numeric'});
+    const en = _lang==='en';
+    const DAYS_EN = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dayName = (dObj) => en ? DAYS_EN[dObj.getDay()] : DAYS[dObj.getDay()];
+    const shBgMap = {'D':'#f59e0b','N':'#4f46e5','A':'#16a34a','B':'#db2777','C':'#0891b2','O':'#334155','L':'#be123c','G':'#0284c7','CO':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'};
 
-    let calHtml = `<div style="background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:16px;margin-bottom:14px">
-      <div style="text-align:center;font-size:26px;font-weight:900;color:#fff;margin-bottom:14px;letter-spacing:.3px">${monthName}</div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:8px">
-        ${DAYS_SHORT.map(d=>`<div style="text-align:center;font-size:14px;font-weight:800;color:#64748b;padding:4px 0;letter-spacing:.5px">${d}</div>`).join('')}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">`;
-
-    // Empty cells before first day
-    for(let i=0;i<startDow;i++){
-      calHtml += `<div></div>`;
-    }
-    for(let day=1; day<=lastDay.getDate(); day++){
-      const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    function _dayCard(dateStr, labelTag){
+      const dO = new Date(dateStr+'T12:00:00');
       const sh = getShift(e, dateStr);
       const isT = dateStr===TODAY_STR;
-      const shBg = {'D':'#f59e0b','N':'#4f46e5','A':'#16a34a','B':'#db2777','C':'#0891b2','O':'#334155','L':'#be123c','G':'#0284c7','CO':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'}[cellClass(sh)]||'#334155';
-      const _infoShifts = ['L','CO','C/O','OD','Ab','HLF'];
-      const _calClick = _infoShifts.includes(sh) ? `onclick="showShiftInfo('${e.id}','${e.name.replace(/'/g,"\\'")}','${dateStr}','${sh}')"` : '';
-      calHtml += `<div ${_calClick} style="text-align:center;border-radius:10px;padding:6px 2px;cursor:${_infoShifts.includes(sh)?'pointer':'default'};background:${isT?'rgba(249,115,22,.18)':'rgba(255,255,255,.03)'};border:${isT?'2px solid rgba(249,115,22,.7)':'1px solid rgba(255,255,255,.06)'}">
-        <div style="font-size:17px;font-weight:${isT?'900':'700'};color:${isT?'#fb923c':'#cbd5e1'};margin-bottom:4px">${day}</div>
-        <div style="display:inline-flex;width:34px;height:28px;border-radius:7px;background:${shBg};align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:19px;color:${sh==='O'?'#94a3b8':'#fff'}">${cellDisp(sh)}</div>
+      const shBg = shBgMap[cellClass(sh)] || '#334155';
+      const infoShifts = ['L','CO','C/O','OD','Ab','HLF'];
+      const click = infoShifts.includes(sh)
+        ? `onclick="showShiftInfo('${e.id}','${String(e.name).replace(/'/g,"\\'")}','${dateStr}','${sh}')" style="cursor:pointer"`
+        : '';
+      const tagHtml = labelTag
+        ? `<div style="font-size:9px;font-weight:800;letter-spacing:.4px;color:${isT?'#fb923c':'#64748b'};margin-bottom:4px;text-transform:uppercase">${labelTag}</div>`
+        : '';
+      return `<div ${click} style="text-align:center;border-radius:12px;padding:10px 6px;min-width:58px;flex:1;background:${isT?'rgba(249,115,22,.18)':'rgba(255,255,255,.03)'};border:${isT?'2px solid rgba(249,115,22,.7)':'1px solid rgba(255,255,255,.06)'}">
+        ${tagHtml}
+        <div style="font-size:12px;font-weight:800;color:${isT?'#fb923c':'#94a3b8'};letter-spacing:.3px">${dayName(dO)}</div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:${isT?'#fb923c':'#e2e8f0'};margin:2px 0 6px">${dO.getDate()}</div>
+        <div style="display:inline-flex;width:36px;height:30px;border-radius:8px;background:${shBg};align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;color:${sh==='O'?'#94a3b8':'#fff'}">${cellDisp(sh)||'—'}</div>
       </div>`;
     }
-    calHtml += `</div></div>`;
 
-    // Next 15 days strip
-    const next15=Array.from({length:15},(_,i)=>addDays(TODAY_STR,i));
-    calHtml += `<div class="stitle">अगले 15 दिन</div>
-    <div class="mini-cal">
-      ${next15.map(d=>{
-        const dO=new Date(d); const sh=getShift(e,d); const isT=d===TODAY_STR;
-        const _isInfoSh15 = ['L','CO','C/O','OD','Ab','HLF'].includes(sh);
-        const _mini15Click = _isInfoSh15 ? `onclick="showShiftInfo('${e.id}','${e.name.replace(/'/g,"\\'")}','${d}','${sh}')" style="cursor:pointer"` : '';
-        return `<div class="mini-day${isT?' today':''}" ${_mini15Click}>
-          <div style="font-size:14px;color:${isT?'#fb923c':'#94a3b8'};font-weight:800;letter-spacing:.3px">${DAYS[dO.getDay()]}</div>
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;color:${isT?'#fb923c':'#e2e8f0'}">${dO.getDate()}</div>
-          <div style="margin-top:4px"><span class="shc ${cellClass(sh)}" style="width:34px;height:28px;font-size:14px">${cellDisp(sh)}</span></div>
-        </div>`;
-      }).join('')}
+    // Previous 3 days (yesterday, -2, -3) — show in chronological order
+    const prevDates = [-3,-2,-1].map(n => addDays(TODAY_STR, n));
+    // Today
+    // Upcoming 7 days (tomorrow .. +7)
+    const nextDates = [1,2,3,4,5,6,7].map(n => addDays(TODAY_STR, n));
+
+    let calHtml = '';
+
+    // Today highlight strip
+    const todayLabel = todaySh==='D' ? (en?'Day Shift':'दिन शिफ्ट')
+                      : todaySh==='N' ? (en?'Night Shift':'रात शिफ्ट')
+                      : todaySh==='L' ? (en?'On Leave':'छुट्टी')
+                      : todaySh==='O' ? (en?'Weekly Off':'साप्ताहिक छुट्टी')
+                      : (cellDisp(todaySh)||'—');
+    calHtml += `<div style="background:linear-gradient(135deg,rgba(249,115,22,.15),rgba(79,70,229,.1));border:1px solid rgba(249,115,22,.35);border-radius:16px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
+      <div style="display:inline-flex;width:48px;height:40px;border-radius:10px;background:${shBgMap[cellClass(todaySh)]||'#334155'};align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:24px;color:#fff">${cellDisp(todaySh)||'—'}</div>
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px">${en?'Today':'आज'}</div>
+        <div style="font-size:18px;font-weight:900;color:#fff">${todayLabel}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">${secName(e.sec)||''}${e.mc?' · '+e.mc:''}</div>
+      </div>
     </div>`;
 
-    // ── SHIFT MATES — Who's on your shift today ──
-    const myShiftToday = todaySh;
-    if(myShiftToday && isWorking(myShiftToday)){
+    // Previous 3 days
+    calHtml += `<div class="stitle">${en?'Previous 3 Days':'पिछले 3 दिन'}</div>
+    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px">
+      ${prevDates.map(d => _dayCard(d, '')).join('')}
+    </div>`;
+
+    // Upcoming 7 days
+    calHtml += `<div class="stitle">${en?'Upcoming 7 Days':'अगले 7 दिन'}</div>
+    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px">
+      ${nextDates.map(d => _dayCard(d, '')).join('')}
+    </div>`;
+
+    // Compact legend
+    calHtml += `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:10px">
+      ${[['D',en?'Day':'दिन','#f59e0b'],['N',en?'Night':'रात','#4f46e5'],['O',en?'Off':'ऑफ','#334155'],['L',en?'Leave':'छुट्टी','#be123c']].map(([c,l,bg])=>
+        `<div style="display:flex;align-items:center;gap:4px"><span style="display:inline-flex;width:22px;height:18px;border-radius:5px;background:${bg};align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff">${c}</span><span style="font-size:11px;color:#94a3b8">${l}</span></div>`
+      ).join('')}
+    </div>`;
+
+    // Shift mates today (keep useful)
+    if(todaySh && isWorking(todaySh)){
       const allEmps = getEmps().filter(emp => emp.status !== 'resigned' && emp.id !== e.id);
       const shiftMates = allEmps.filter(emp => {
         const theirShift = getShift(emp, TODAY_STR);
-        return theirShift === myShiftToday || (myShiftToday === 'G' && isWorking(theirShift));
+        return theirShift === todaySh || (todaySh === 'G' && isWorking(theirShift));
       });
-      
       if(shiftMates.length > 0){
-        // Group by section
-        const grouped = {};
-        shiftMates.forEach(emp => {
-          const secKey = emp.sec || 'OTHER';
-          if(!grouped[secKey]) grouped[secKey] = [];
-          grouped[secKey].push(emp);
-        });
-        
-        const shiftLabel = myShiftToday === 'D' ? '☀️ दिन शिफ्ट' : myShiftToday === 'N' ? '🌙 रात शिफ्ट' : myShiftToday === 'G' ? '🏢 जनरल' : '📋 आज की शिफ्ट';
-        const shiftColor = myShiftToday === 'D' ? '#f59e0b' : myShiftToday === 'N' ? '#818cf8' : '#0284c7';
-        
-        calHtml += `<div class="stitle" style="margin-top:18px">${shiftLabel} में आज कौन है</div>
-        <div style="background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:14px;margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-            <div style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:28px;border-radius:7px;background:${shiftColor};font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:19px;color:#fff">${cellDisp(myShiftToday)}</div>
-            <div style="font-size:20px;font-weight:800;color:#fff">कुल <span style="color:${shiftColor}">${shiftMates.length}</span> साथी आज आपके साथ हैं</div>
-          </div>`;
-        
-        Object.entries(grouped).forEach(([secKey, members]) => {
-          const secInfo = SEC[secKey] || {hi:secKey, color:'#94a3b8', bg:'rgba(148,163,184,.1)', icon:'👤'};
-          calHtml += `<div style="margin-bottom:10px">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-              <span style="font-size:14px">${secInfo.icon}</span>
-              <span style="font-size:17px;font-weight:800;color:${secInfo.color};letter-spacing:.3px">${secInfo.hi}</span>
-              <span style="font-size:10px;color:#64748b;font-weight:700">(${members.length})</span>
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">`;
-          
-          members.forEach(emp => {
-            const roleInfo = getEmpRole(emp);
-            const isMain = roleInfo.role === 'main';
-            const isSup = roleInfo.role === 'sup_met' || roleInfo.role === 'sup_slit';
-            const borderColor = isMain ? 'rgba(249,115,22,.5)' : isSup ? 'rgba(168,85,247,.5)' : 'rgba(255,255,255,.1)';
-            const bgColor = isMain ? 'rgba(249,115,22,.08)' : isSup ? 'rgba(168,85,247,.08)' : 'rgba(255,255,255,.04)';
-            const roleBadge = isMain ? '<span style="font-size:8px;color:#f97316;font-weight:900;letter-spacing:.5px">MAIN</span>' 
-                            : isSup ? '<span style="font-size:8px;color:#a855f7;font-weight:900;letter-spacing:.5px">SUP</span>' : '';
-            
-            calHtml += `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:8px 10px;min-width:0;flex:0 0 auto;max-width:100%">
-              <div style="font-size:17px;font-weight:800;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${emp.name}</div>
-              <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
-                <span style="font-size:14px;color:#64748b">${emp.mc||'—'}</span>
-                ${roleBadge}
-              </div>
-            </div>`;
-          });
-          
-          calHtml += `</div></div>`;
-        });
-        
-        calHtml += `</div>`;
+        const shiftLabel = todaySh === 'D' ? (en?'Day Shift mates':'दिन शिफ्ट साथी') : todaySh === 'N' ? (en?'Night Shift mates':'रात शिफ्ट साथी') : (en?'Shift mates today':'आज के शिफ्ट साथी');
+        const shiftColor = todaySh === 'D' ? '#f59e0b' : todaySh === 'N' ? '#818cf8' : '#0284c7';
+        calHtml += `<div class="stitle" style="margin-top:8px">${shiftLabel}</div>
+        <div style="background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px;margin-bottom:14px">
+          <div style="font-size:13px;color:#94a3b8;margin-bottom:8px">${en?'Total':'कुल'} <b style="color:${shiftColor}">${shiftMates.length}</b></div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${shiftMates.slice(0,24).map(emp => {
+              const role=getEmpRole(emp);
+              const isMain=role.role==='main';
+              const isSup=role.role==='sup_met'||role.role==='sup_slit';
+              const border=isMain?'rgba(249,115,22,.45)':isSup?'rgba(168,85,247,.45)':'rgba(255,255,255,.1)';
+              const bg=isMain?'rgba(249,115,22,.08)':isSup?'rgba(168,85,247,.08)':'rgba(255,255,255,.04)';
+              return `<div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:6px 10px">
+                <div style="font-size:13px;font-weight:800;color:#e2e8f0">${emp.name}</div>
+                <div style="font-size:11px;color:#64748b">${emp.mc||secName(emp.sec)||'—'}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
       }
-    } else if(myShiftToday === 'O' || myShiftToday === 'L' || myShiftToday === 'CO' || myShiftToday === 'C/O'){
-      // Off / Leave day — show a friendly message
-      const offMsg = myShiftToday === 'L' ? '🏖️ आज आपकी छुट्टी है — आराम करें!' : '😊 आज आपका ऑफ है — मज़े करें!';
-      calHtml += `<div style="background:rgba(148,163,184,.06);border:1px solid rgba(148,163,184,.15);border-radius:14px;padding:16px;margin-top:14px;text-align:center">
+    } else if(todaySh === 'O' || todaySh === 'L' || todaySh === 'CO' || todaySh === 'C/O'){
+      const offMsg = todaySh === 'L'
+        ? (en?'🏖️ You are on leave today — rest well!':'🏖️ आज आपकी छुट्टी है — आराम करें!')
+        : (en?'😊 Weekly off today — enjoy!':'😊 आज आपका ऑफ है — मज़े करें!');
+      calHtml += `<div style="background:rgba(148,163,184,.06);border:1px solid rgba(148,163,184,.15);border-radius:14px;padding:16px;margin-top:4px;text-align:center">
         <div style="font-size:14px;color:#94a3b8;font-weight:700">${offMsg}</div>
       </div>`;
     }
 
     document.getElementById('homeShiftCalendar').innerHTML = calHtml;
-
-    // Render todo summary inside home
     updateHomeTodoSummary();
   }
 }
@@ -19891,24 +19951,50 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
 // ════════════════════════════════════════
 function initPWA(){
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('/sw.js?v=20260925c').then(reg=>{
+    // Single stable registration URL (no query param) — prevents update loops
+    navigator.serviceWorker.register('/sw.js').then(reg=>{
       console.log('SW registered:', reg.scope);
-      let _swUpdating = false;
+
+      // Prevent infinite reload: only auto-refresh once per browser session
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if(refreshing) return;
+        // Only reload if we intentionally activated a waiting worker
+        if(sessionStorage.getItem('mp_sw_pending_reload') === '1'){
+          sessionStorage.removeItem('mp_sw_pending_reload');
+          refreshing = true;
+          window.location.reload();
+        }
+      });
+
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if(!newWorker) return;
         newWorker.addEventListener('statechange', () => {
+          // New SW installed while an old one controls the page
           if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
-            _swUpdating = true;
+            // Already prompted/reloaded this session? Skip to avoid loop
+            if(sessionStorage.getItem('mp_sw_update_done') === '1') return;
+            sessionStorage.setItem('mp_sw_update_done', '1');
+            sessionStorage.setItem('mp_sw_pending_reload', '1');
             try{ newWorker.postMessage('SKIP_WAITING'); }catch(e){}
-            try{ toast('🔄 नया version मिला — refresh हो रहा है...'); }catch(e){}
-            setTimeout(() => { if(_swUpdating) window.location.reload(); }, 2500);
+            try{ toast('🔄 New version available — refreshing...'); }catch(e){}
+            // Fallback reload if controllerchange doesn't fire
+            setTimeout(() => {
+              if(sessionStorage.getItem('mp_sw_pending_reload') === '1'){
+                sessionStorage.removeItem('mp_sw_pending_reload');
+                window.location.reload();
+              }
+            }, 3000);
           }
         });
       });
-      setTimeout(() => { try{ setInterval(() => { reg.update(); }, 15 * 60 * 1000); }catch(e){} }, 60000);
+
+      // Check for updates occasionally (not aggressively)
+      setTimeout(() => {
+        try{ setInterval(() => { reg.update().catch(()=>{}); }, 30 * 60 * 1000); }catch(e){}
+      }, 120000);
     }).catch(e=> console.log('SW error:', e));
-    navigator.serviceWorker.addEventListener('controllerchange', () => {});
   }
   try{ _mpInitInstallUi(); }catch(e){ console.warn('install UI', e); }
 }

@@ -492,12 +492,11 @@ window.addEventListener('appinstalled', function () {
     <div class="stats-grid" id="homeStats"></div>
     <div class="stitle" id="homeSectionTitle">आज की स्थिति — सेक्शन वार</div>
     <div id="homeSections"></div>
-    <div class="stitle">आज का रोस्टर</div>
     <div id="homeRoster"></div>
   </div>
   <!-- Personal shift view for workers -->
   <div id="homeWorkerView" style="display:none">
-    <div class="stitle">📅 मेरा शिफ्ट कैलेंडर</div>
+    <div class="stitle" id="homeWorkerCalTitle">📅 My Shift — Past 3 & Next 7 Days</div>
     <div id="homeShiftCalendar"></div>
     <!-- ── TO-DO SUMMARY (links to dedicated tab) ── -->
     <div class="stitle" style="margin-top:20px">✅ My Tasks</div>
@@ -1332,16 +1331,7 @@ window.__sectionsReady = (async function loadSections(){
 
 <script src="js/app.js"></script>
 
-<script>
-// Early service worker registration (PWABuilder / installability)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js').catch(function (e) {
-      console.warn('[SW]', e);
-    });
-  });
-}
-</script>
+<!-- SW registered once in js/app.js initPWA() to avoid double-register update loop -->
 
 </body>
 </html>
