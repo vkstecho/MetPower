@@ -1,6 +1,6 @@
 /* MET Power — service worker (installability + offline shell)
    Fixed: no infinite update/reload loop */
-const CACHE = 'metpower-v3';
+const CACHE = 'metpower-v5';
 const PRECACHE = [
   './',
   './index.html',

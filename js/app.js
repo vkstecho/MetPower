@@ -5143,6 +5143,28 @@ function showEmpNameFull(name, empId, sec){
 }
 
 function cellDisp(s){  if(!s) return ''; const m={'D':'D','N':'N','A':'A','B':'B','C':'C','O':'O','L':'L','C/O':'CO','CO':'CO','G':'G','GP':'GP','HLF':'½','H':'H','Ab':'Ab','OD':'OD'}; return m[s]||s||''; }
+/** Short word for shift code — Home calendar labels (EN/HI) */
+function shiftWord(s){
+  if(!s) return '';
+  const en = (typeof _lang !== 'undefined' && _lang === 'en');
+  const key = (s === 'C/O') ? 'CO' : s;
+  const mapEn = {D:'Day',N:'Night',O:'Off',L:'Leave',G:'Gen',GP:'GP',CO:'C-Off','C/O':'C-Off',H:'Hol',HLF:'Half',Ab:'Abs',OD:'OD',A:'A-Sh',B:'B-Sh',C:'C-Sh'};
+  const mapHi = {D:'दिन',N:'रात',O:'ऑफ',L:'छुट्टी',G:'जनरल',GP:'GP',CO:'C-Off','C/O':'C-Off',H:'हॉलिडे',HLF:'आधा',Ab:'अनुप',OD:'OD',A:'A शिफ्ट',B:'B शिफ्ट',C:'C शिफ्ट'};
+  return (en ? mapEn : mapHi)[key] || key;
+}
+/** Colored badge HTML: letter + short word (for Home day cards) */
+function shiftBadgeHtml(s, size){
+  const code = cellDisp(s) || '—';
+  const word = shiftWord(s) || (code === '—' ? '—' : code);
+  const cls = cellClass(s) || 'blank';
+  const sizeCls = size === 'lg' ? ' hm-today-badge' : '';
+  // D uses dark text on amber — handled in CSS
+  return `<div class="hm-shift-badge ${cls}${sizeCls}" title="${code} ${word}">
+    <span class="hm-shift-letter">${code}</span>
+    <span class="hm-shift-word">${word}</span>
+  </div>`;
+}
+
 function getShiftTimingStripHtml(){
   const cfg=getShiftConfigSync();
   const byCode={};
@@ -5358,7 +5380,6 @@ function _renderHomePersonalCalendar(){
     return;
   }
 
-  // Soft validity warning for workers
   try{
     if(!isAdminOrMgr()){
       fbGet('deviceApprovals/' + e.id).then(approval=>{
@@ -5376,21 +5397,19 @@ function _renderHomePersonalCalendar(){
   const todaySh=getShift(e,TODAY_STR);
   const DAYS_EN = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const dayName = (dObj) => en ? DAYS_EN[dObj.getDay()] : DAYS[dObj.getDay()];
-  const shBgMap = {'D':'#f59e0b','N':'#4f46e5','A':'#16a34a','B':'#db2777','C':'#0891b2','O':'#334155','L':'#be123c','G':'#0284c7','CO':'#92400e','HLF':'#ea580c','Ab':'#7f1d1d','H':'#ea580c','OD':'#0d9488'};
 
   function _dayCard(dateStr){
     const dO = new Date(dateStr+'T12:00:00');
     const sh = getShift(e, dateStr);
     const isT = dateStr===TODAY_STR;
-    const shBg = shBgMap[cellClass(sh)] || '#334155';
-    const infoShifts = ['L','CO','C/O','OD','Ab','HLF'];
+    const infoShifts = ['L','CO','C/O','OD','Ab','HLF','H'];
     const click = infoShifts.includes(sh)
       ? `onclick="showShiftInfo('${e.id}','${String(e.name).replace(/'/g,"\\'")}','${dateStr}','${sh}')" style="cursor:pointer"`
       : '';
     return `<div class="hm-day-card${isT?' today':''}" ${click}>
       <div class="hm-day-name">${dayName(dO)}</div>
       <div class="hm-day-num">${dO.getDate()}</div>
-      <div style="display:inline-flex;width:36px;height:30px;border-radius:8px;background:${shBg};align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;color:#fff">${cellDisp(sh)||'—'}</div>
+      ${shiftBadgeHtml(sh)}
     </div>`;
   }
 
@@ -5399,17 +5418,22 @@ function _renderHomePersonalCalendar(){
 
   let calHtml = '';
 
-  const todayLabel = todaySh==='D' ? (en?'Day Shift':'दिन शिफ्ट')
+  const todayLabel = todaySh ? `${cellDisp(todaySh)} · ${shiftWord(todaySh)}` : '—';
+  const longLabel = todaySh==='D' ? (en?'Day Shift':'दिन शिफ्ट')
                     : todaySh==='N' ? (en?'Night Shift':'रात शिफ्ट')
+                    : todaySh==='A' ? (en?'A Shift (morning)':'A शिफ्ट')
+                    : todaySh==='B' ? (en?'B Shift (afternoon)':'B शिफ्ट')
+                    : todaySh==='C' ? (en?'C Shift (evening)':'C शिफ्ट')
                     : todaySh==='L' ? (en?'On Leave':'छुट्टी')
                     : todaySh==='O' ? (en?'Weekly Off':'साप्ताहिक छुट्टी')
-                    : (cellDisp(todaySh)||'—');
-  const todayBg = shBgMap[cellClass(todaySh)] || '#334155';
+                    : todaySh==='G' ? (en?'General Shift':'जनरल शिफ्ट')
+                    : (shiftWord(todaySh) || cellDisp(todaySh) || '—');
+
   calHtml += `<div class="hm-today-banner">
-    <div style="display:inline-flex;width:48px;height:40px;border-radius:10px;background:${todayBg};align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:24px;color:#fff">${cellDisp(todaySh)||'—'}</div>
+    ${shiftBadgeHtml(todaySh, 'lg')}
     <div style="flex:1">
       <div class="hm-today-label">${en?'Today':'आज'}</div>
-      <div class="hm-today-shift">${todayLabel}</div>
+      <div class="hm-today-shift">${longLabel}</div>
       <div class="hm-today-sub">${e.name||''} · ${secName(e.sec)||''}${e.mc?' · '+e.mc:''}</div>
     </div>
   </div>`;
@@ -5420,13 +5444,16 @@ function _renderHomePersonalCalendar(){
   calHtml += `<div class="stitle">${en?'Upcoming 14 Days':'अगले 14 दिन'}</div>
   <div class="hm-day-row">${nextDates.map(d => _dayCard(d)).join('')}</div>`;
 
+  // Full fixed legend
+  const legendItems = en
+    ? [['D','Day','#f59e0b','#1a1a2e'],['N','Night','#4f46e5','#fff'],['A','A Shift','#16a34a','#fff'],['B','B Shift','#db2777','#fff'],['C','C Shift','#0891b2','#fff'],['O','Off','#475569','#fff'],['L','Leave','#be123c','#fff'],['G','General','#0284c7','#fff'],['CO','C-Off','#92400e','#fde68a'],['H','Holiday','#ea580c','#fff']]
+    : [['D','दिन','#f59e0b','#1a1a2e'],['N','रात','#4f46e5','#fff'],['A','A शिफ्ट','#16a34a','#fff'],['B','B शिफ्ट','#db2777','#fff'],['C','C शिफ्ट','#0891b2','#fff'],['O','ऑफ','#475569','#fff'],['L','छुट्टी','#be123c','#fff'],['G','जनरल','#0284c7','#fff'],['CO','C-Off','#92400e','#fde68a'],['H','हॉलिडे','#ea580c','#fff']];
   calHtml += `<div class="hm-legend">
-    ${[['D',en?'Day':'दिन','#f59e0b'],['N',en?'Night':'रात','#4f46e5'],['O',en?'Off':'ऑफ','#64748b'],['L',en?'Leave':'छुट्टी','#be123c']].map(([c,l,bg])=>
-      `<div class="hm-legend-item"><span style="display:inline-flex;width:22px;height:18px;border-radius:5px;background:${bg};align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff">${c}</span><span>${l}</span></div>`
+    ${legendItems.map(([c,l,bg,fg])=>
+      `<div class="hm-legend-item"><span class="hm-leg-swatch" style="background:${bg};color:${fg}">${c}</span><span>${l}</span></div>`
     ).join('')}
   </div>`;
 
-  // Shift mates (helpful for everyone on duty today)
   if(todaySh && isWorking(todaySh)){
     const allEmps = getEmps().filter(emp => emp.status !== 'resigned' && emp.id !== e.id);
     const shiftMates = allEmps.filter(emp => {
@@ -5462,6 +5489,7 @@ function _renderHomePersonalCalendar(){
 
   calEl.innerHTML = calHtml;
 }
+
 
 // ════════════════════════════════════════
 // HOME TODO SUMMARY (compact card linking to tab)

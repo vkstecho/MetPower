@@ -46,7 +46,7 @@ body.light .stitle{color:#1a1a2e;}
 body.light .inp-field,body.light input,body.light select,body.light textarea{background:#f5f6f8;color:#1a1a2e;border-color:rgba(0,0,0,.12);}
 body.light .submit-btn{background:var(--m1);color:#fff;}
 body.light .cancel-btn{background:#e8eaef;color:#5a6579;border-color:rgba(0,0,0,.1);}
-body.light .shc.O{background:#e2e8f0;color:#64748b;}
+body.light .shc.O{background:#64748b;color:#ffffff !important;}
 body.light tr.sec-row td{background:#1e293b;color:#fff;}
 /* ecol dark background handled in sched-tbl specific rules below */
 body.light .my-row{background:#fff5e6 !important;}
@@ -254,7 +254,111 @@ body.light .emergency-num { color:#c2410c !important; }
   color:var(--text);
   margin:2px 0 6px;
 }
+
 .hm-day-card.today .hm-day-num{ color:#ea580c; }
+
+/* Home calendar: letter + short word under colored badge */
+.hm-shift-badge{
+  display:inline-flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  min-width:40px;
+  padding:4px 6px 3px;
+  border-radius:9px;
+  gap:1px;
+  margin:0 auto;
+}
+.hm-shift-letter{
+  font-family:'Barlow Condensed',sans-serif;
+  font-weight:900;
+  font-size:16px;
+  line-height:1;
+  color:#fff;
+  letter-spacing:.3px;
+}
+.hm-shift-word{
+  font-size:9px;
+  font-weight:800;
+  line-height:1.1;
+  color:rgba(255,255,255,.95);
+  letter-spacing:.2px;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+/* Off badge: higher contrast slate */
+.hm-shift-badge.O{
+  background:#475569 !important;
+  border:1px solid rgba(255,255,255,.2);
+}
+.hm-shift-badge.O .hm-shift-letter,
+.hm-shift-badge.O .hm-shift-word{ color:#fff !important; }
+.hm-shift-badge.D{ background:#f59e0b !important; }
+.hm-shift-badge.D .hm-shift-letter,
+.hm-shift-badge.D .hm-shift-word{ color:#1a1a2e !important; }
+.hm-shift-badge.N{ background:#4f46e5 !important; }
+.hm-shift-badge.A{ background:#16a34a !important; }
+.hm-shift-badge.A .hm-shift-letter,
+.hm-shift-badge.A .hm-shift-word{ color:#fff !important; }
+.hm-shift-badge.B{ background:#db2777 !important; }
+.hm-shift-badge.B .hm-shift-letter,
+.hm-shift-badge.B .hm-shift-word{ color:#fff !important; }
+.hm-shift-badge.C{ background:#0891b2 !important; }
+.hm-shift-badge.C .hm-shift-letter,
+.hm-shift-badge.C .hm-shift-word{ color:#fff !important; }
+
+.hm-shift-badge.G{ background:#0284c7 !important; }
+.hm-shift-badge.L{ background:#be123c !important; }
+.hm-shift-badge.CO,
+.hm-shift-badge.C\/O{ background:#92400e !important; }
+.hm-shift-badge.H,
+.hm-shift-badge.HLF{ background:#ea580c !important; }
+.hm-shift-badge.Ab{ background:#7f1d1d !important; }
+.hm-shift-badge.OD{ background:#0d9488 !important; }
+.hm-shift-badge.GP{ background:#6d28d9 !important; }
+.hm-shift-badge.blank,
+.hm-shift-badge.\-\-\-{
+  background:#e2e8f0 !important;
+}
+.hm-shift-badge.blank .hm-shift-letter,
+.hm-shift-badge.blank .hm-shift-word,
+.hm-shift-badge.\-\-\- .hm-shift-letter,
+.hm-shift-badge.\-\-\- .hm-shift-word{
+  color:#64748b !important;
+}
+body.light .hm-shift-badge.blank{
+  background:#e2e8f0 !important;
+}
+.hm-today-badge{
+  display:inline-flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  min-width:52px;
+  min-height:44px;
+  padding:6px 10px;
+  border-radius:12px;
+  gap:2px;
+}
+.hm-today-badge .hm-shift-letter{ font-size:22px; }
+.hm-today-badge .hm-shift-word{ font-size:10px; }
+.hm-legend-item .hm-leg-swatch{
+  display:inline-flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  min-width:28px;
+  height:28px;
+  border-radius:6px;
+  padding:2px 4px;
+  font-family:'Barlow Condensed',sans-serif;
+  font-weight:900;
+  font-size:12px;
+  color:#fff;
+  line-height:1;
+}
+
+
 .hm-today-banner{
   background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(79,70,229,.08));
   border:1px solid rgba(249,115,22,.35);
@@ -971,7 +1075,7 @@ body.light .learn-screen [style*="color:var(--text)"] { color:#fff !important; -
 .shc.A{background:#16a34a;color:#fff !important;font-size:14px;font-weight:900;}
 .shc.B{background:#db2777;color:#fff !important;font-size:14px;font-weight:900;}
 .shc.C{background:#0891b2;color:#fff !important;font-size:14px;font-weight:900;}
-.shc.O{background:#334155;color:#94a3b8;font-weight:900;}
+.shc.O{background:#475569;color:#ffffff !important;font-weight:900;border:1px solid rgba(255,255,255,.15);}
 .shc.L{background:#be123c;color:#fff !important;font-weight:900;}
 .shc.CO{background:#92400e;color:#fde68a;font-weight:900;font-size:10px;}
 .shc.G{background:#0284c7;color:#fff !important;font-weight:900;}
@@ -2377,7 +2481,7 @@ body.light .sched-tbl td.ecol .emp-nm {
 .shc.A { background: #15803d !important; color: #fff !important; }
 .shc.B { background: #be185d !important; color: #fff !important; }
 .shc.C { background: #0e7490 !important; color: #fff !important; }
-.shc.O { background: #334155 !important; color: #e2e8f0 !important; }
+.shc.O { background: #475569 !important; color: #ffffff !important; }
 .shc.L { background: #be123c !important; color: #fff !important; }
 .shc.G { background: #0369a1 !important; color: #fff !important; }
 
