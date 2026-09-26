@@ -942,22 +942,50 @@ function switchViewCompany(companyId){
 function _normMobileKey(m){ return (m||'').toString().replace('+91','').replace(/[^0-9]/g,''); }
 function getEmps(){
   const all=_cache.employees||[];
+  const activeOnly = (list)=> list.filter(e=>e && e.status!=='resigned' && e.status!=='left' && e.status!=='left_team' && e.status!=='removed');
   if(isAdmin()){
     const cid=SESSION.viewCompanyId||'ALL';
     if(cid==='ALL') return all;
-    return all.filter(e=>_normCompanyId(e.companyId)===cid); // admin sees everyone under that company, any manager
+    return all.filter(e=>_normCompanyId(e.companyId)===cid);
   }
   if(SESSION.role==='manager' && SESSION.mobile){
     const key=_normMobileKey(SESSION.mobile);
-    return all.filter(e=>e.managerId===key); // ONLY employees this Manager personally added
+    return activeOnly(all.filter(e=>e.managerId===key));
   }
-  if(SESSION.role==='member' && SESSION.managerId){
-    return all.filter(e=>e.managerId===SESSION.managerId); // same team as their Manager
+  if(SESSION.role==='member'){
+    // Left / pending members must NOT see Manager's full team
+    if(SESSION.pendingApproval || SESSION.status==='pending' || SESSION.status==='left' || SESSION.status==='left_team' || SESSION.status==='revoked' || SESSION.status==='rejected'){
+      const self = _findOwnEmployeeRecord();
+      return self ? [self] : [];
+    }
+    if(SESSION.managerId){
+      return activeOnly(all.filter(e=>e.managerId===SESSION.managerId));
+    }
+    const self = _findOwnEmployeeRecord();
+    return self ? [self] : [];
   }
-  // Legacy employee-code system (old Workers/Managers/Supervisors/Admin default) — unchanged, company-wide
   const cid=myCompanyId();
   if(cid==='ALL') return all;
   return all.filter(e=>_normCompanyId(e.companyId)===cid);
+}
+
+function _findOwnEmployeeRecord(){
+  const all = _cache.employees||[];
+  if(SESSION.empObjId){
+    const byId = all.find(e=>e.id===SESSION.empObjId);
+    if(byId) return byId;
+  }
+  const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
+  if(mob){
+    const byPhone = all.find(e=>_normMobileKey(e.phone||e.mobile||'')===mob);
+    if(byPhone) return byPhone;
+  }
+  if(SESSION.empId){
+    const code = String(SESSION.empId).trim().toUpperCase();
+    const byCode = all.find(e=>String(e.empId||e.code||'').trim().toUpperCase()===code);
+    if(byCode) return byCode;
+  }
+  return null;
 }
 
 
@@ -1611,7 +1639,27 @@ function isManagerSelfRecord(emp){
   if(SESSION.empObjId && emp.id === SESSION.empObjId) return true;
   return false;
 }
-function myEmp(){ return getEmps().find(e=>e.id===SESSION.empObjId)||null; }
+function myEmp(){
+  const own = (typeof _findOwnEmployeeRecord==='function') ? _findOwnEmployeeRecord() : null;
+  if(own) return own;
+  if(SESSION.empObjId) return (_cache.employees||[]).find(e=>e.id===SESSION.empObjId)||null;
+  return null;
+}
+
+async function _unlinkMobileUserOnLeave(emp){
+  try{
+    if(!emp) return;
+    const mob = _normMobileKey(emp.phone||emp.mobile||'');
+    if(!mob || mob.length<10) return;
+    await fbUpdate('mobileUsers/'+mob, {
+      status: 'left_team',
+      managerId: null,
+      leftAt: new Date().toISOString(),
+      leftReason: emp.status||'removed'
+    });
+  }catch(e){ console.warn('[unlinkMobile]', e); }
+}
+
 
 // ── DEVICE FINGERPRINT ──
 function getDeviceId(){
@@ -1736,19 +1784,22 @@ function _clearAllSessionData(){
 
 // ── Helper: Show login screen safely — NEVER leaves black screen ──
 function _showLoginScreenSafely(){
-  // Kill loading screen
-  var ls=document.getElementById('loadingScreen');
-  if(ls){ ls.style.cssText='display:none!important;opacity:0;pointer-events:none;visibility:hidden'; }
-  // Kill any expiry walls
-  var ew=document.getElementById('hardExpiryWall'); if(ew) ew.remove();
-  // Hide app
-  var mh=document.getElementById('mainHdr'); if(mh) mh.style.display='none';
-  var mc=document.getElementById('mainContent'); if(mc) mc.style.display='none';
-  // Show login
-  var login=document.getElementById('loginScreen');
-  if(login){ login.style.display='flex'; login.classList.add('show'); }
-  if(typeof showStep==='function') try{ showStep(1); }catch(e){}
-  setTimeout(()=>{ try{ toast('🔄 दोबारा Login करें'); }catch(e){} }, 400);
+  try{
+    var ls=document.getElementById('loadingScreen');
+    if(ls){ ls.style.cssText='display:none!important;opacity:0;pointer-events:none;visibility:hidden'; }
+    var ew=document.getElementById('hardExpiryWall'); if(ew) ew.remove();
+    var pb=document.getElementById('pendingBox'); if(pb) pb.style.display='none';
+    var fp=document.getElementById('fingerprintScreen');
+    if(fp){ fp.style.display='none'; fp.classList.remove('show'); }
+    var mh=document.getElementById('mainHdr'); if(mh) mh.style.display='none';
+    var mc=document.getElementById('mainContent'); if(mc) mc.style.display='none';
+    var login=document.getElementById('loginScreen');
+    if(login){
+      login.style.cssText='display:flex!important;position:fixed;inset:0;z-index:500;flex-direction:column;align-items:center;justify-content:flex-start;padding:32px 20px 40px;overflow:auto;background:linear-gradient(160deg,#070c15 0%,#0d1623 45%,#130a24 100%);';
+      login.classList.add('show');
+    }
+    if(typeof showStep==='function') try{ showStep(1); }catch(e){}
+  }catch(e){ console.error('_showLoginScreenSafely', e); }
 }
 
 // ── 45-DAY HARD EXPIRY ──
@@ -2236,13 +2287,22 @@ async function _checkUserAfterOTP(){
       if(userData.status==='revoked'){
         toast('🚫 आपकी access revoke कर दी गई है। VKS Tech से संपर्क करें: +91-8929394920'); return;
       }
-      // Manager left team earlier — treat as fresh user (can re-register / join again)
-      if(userData.status==='left_team' || userData.status==='left'){
+      if(userData.status==='left_team' || userData.status==='left' || userData.status==='removed'){
         try{ await fbRemove('mobileUsers/'+mobile); }catch(e){}
-        toast('👋 Previous team left — register again as Manager or Member');
+        toast('👋 Team से हटा दिए गए — दोबारा Manager/Member register करें');
         showStep(3);
         return;
       }
+      try{
+        const allEmp = _cache.employees || [];
+        const empHit = allEmp.find(e => _normMobileKey(e.phone||e.mobile||'')===mobile);
+        if(empHit && (empHit.status==='resigned'||empHit.status==='left'||empHit.status==='left_team'||empHit.status==='removed')){
+          try{ await fbUpdate('mobileUsers/'+mobile, { status:'left_team', managerId:null, leftAt:new Date().toISOString() }); }catch(e){}
+          toast('👋 आप team से remove हो चुके हैं — दोबारा register करें');
+          showStep(3);
+          return;
+        }
+      }catch(e){}
       if(userData.status==='approved'){
         if(userData.validTill && new Date(userData.validTill)<new Date()){
           toast('⏰ आपकी access expire हो गई है। Admin से validity बढ़वाएं: +91-8929394920'); return;
@@ -2415,12 +2475,9 @@ async function _submitManagerReg(){
     try{ sessionStorage.setItem('mp_pending_mgr_wa', JSON.stringify({phone:adminPhone, text:waText})); }catch(e){}
 
     toast('✅ Manager account ready — logging in...');
-    // Login first — WhatsApp must NOT interrupt / navigate away
+    // Do NOT auto-open WhatsApp here (was causing black screen / navigation issues).
+    // Admin still gets in-app notification. WA text saved for optional later send.
     _launchAsNewUser(userData);
-    // Open WA after app is visible (new window only)
-    setTimeout(()=>{
-      try{ openWA(adminPhone, waText); }catch(e){ console.warn('[mgrReg] WhatsApp', e); }
-    }, 1500);
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
@@ -3986,8 +4043,16 @@ async function launchApp(){
   // ── Show app immediately — do this FIRST before anything else ──
   const _mh = document.getElementById('mainHdr');
   const _mc = document.getElementById('mainContent');
-  if(_mh) _mh.style.display='block';
-  if(_mc) _mc.style.display='block';
+  if(_mh){ _mh.style.display='block'; _mh.style.visibility='visible'; _mh.style.opacity='1'; }
+  if(_mc){ _mc.style.display='block'; _mc.style.visibility='visible'; _mc.style.opacity='1'; }
+  try{
+    const login=document.getElementById('loginScreen');
+    if(login){ login.style.display='none'; login.classList.remove('show'); }
+    const ls=document.getElementById('loadingScreen');
+    if(ls){ ls.style.cssText='display:none!important;opacity:0;pointer-events:none;visibility:hidden'; }
+    const fp=document.getElementById('fingerprintScreen');
+    if(fp){ fp.style.display='none'; fp.classList.remove('show'); }
+  }catch(e){}
 
   // ── Sync header height immediately so sidebar + sticky elements position correctly ──
   try{ syncStickyTop(); }catch(e){}
@@ -4570,8 +4635,10 @@ function openEditProfileModal(){
   _profilePhotoData = null;
   const photo = SESSION.photoUrl || '';
   const isEn = (typeof _lang !== 'undefined' && _lang === 'en');
+  const emp = myEmp() || {};
+  const esc = (s)=> String(s==null?'':s).replace(/"/g,'&quot;');
   openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">✏️ ${isEn?'Edit Profile':'Profile Edit करें'}</div>
+    <div class="modal-title">✏️ ${isEn?'My Profile':'मेरी Profile'}</div>
     <div style="text-align:center;margin-bottom:16px">
       <div id="profilePhotoPreview" style="width:96px;height:96px;border-radius:50%;margin:0 auto 10px;background:linear-gradient(135deg,#f97316,#a855f7);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:900;color:#fff;overflow:hidden;border:3px solid rgba(249,115,22,.4)">
         ${photo?`<img src="${photo}" style="width:100%;height:100%;object-fit:cover">`:(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2)}
@@ -4580,14 +4647,26 @@ function openEditProfileModal(){
       <button type="button" class="cancel-btn" style="display:inline-flex;align-items:center;gap:6px;margin:0 4px" onclick="document.getElementById('profilePhotoInput').click()">📷 ${isEn?'Set photo':'फोटो लगाएं'}</button>
       ${photo||_profilePhotoData?`<button type="button" class="cancel-btn" style="display:inline-flex;color:#f43f5e;margin:0 4px" onclick="clearProfilePhoto()">🗑️</button>`:''}
     </div>
-    <div class="field">
-      <label>${isEn?'Name':'नाम'}</label>
-      <input class="inp-field" id="profileNameInput" value="${(SESSION.name||'').replace(/"/g,'&quot;')}" maxlength="60">
+    <div class="field"><label>${isEn?'Name':'नाम'}</label>
+      <input class="inp-field" id="profileNameInput" value="${esc(SESSION.name||emp.name||'')}" maxlength="60"></div>
+    <div class="field"><label>${isEn?'Date of Birth':'जन्म तिथि (DOB)'}</label>
+      <input class="inp-field" type="date" id="profileDobInput" value="${esc(emp.dob||'')}"></div>
+    <div class="field"><label>${isEn?'Date of Joining':'जॉइनिंग डेट'}</label>
+      <input class="inp-field" type="date" id="profileDojInput" value="${esc(emp.joiningDate||emp.doj||'')}"></div>
+    <div class="field"><label>${isEn?'Salary (monthly)':'सैलरी (मासिक)'}</label>
+      <input class="inp-field" type="number" id="profileSalaryInput" value="${esc(emp.salary||'')}" placeholder="₹"></div>
+    <div class="field"><label>${isEn?'Weekly Off':'वीकली ऑफ'}</label>
+      <select class="inp-field" id="profileWoffInput">
+        ${['','SUN','MON','TUE','WED','THU','FRI','SAT'].map(d=>`<option value="${d}" ${(emp.woff||'')===d?'selected':''}>${d||'—'}</option>`).join('')}
+      </select></div>
+    <div class="field"><label>${isEn?'Designation':'पद'}</label>
+      <input class="inp-field" id="profileDesigInput" value="${esc(emp.designation||'')}" maxlength="40"></div>
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:12px;line-height:1.5">
+      ${isEn
+        ? 'Details from Manager are shown here. Changes notify your Manager.'
+        : 'Manager द्वारा भरी जानकारी यहाँ दिखती है। बदलाव पर Manager को notification जाएगी।'}
     </div>
-    <div style="font-size:11px;color:var(--muted2);margin-bottom:12px;line-height:1.4">
-      ${isEn?'Photo is stored securely and shown on your profile & header.':'फोटो सुरक्षित सेव होगी — profile और header पर दिखेगी।'}
-    </div>
-    <button class="submit-btn" onclick="saveProfileEdits()">💾 ${isEn?'Save':'सेव करें'}</button>
+    <button class="submit-btn" onclick="saveProfileEdits()">💾 ${isEn?'Save & Notify Manager':'सेव + Manager को सूचित करें'}</button>
     <button class="cancel-btn" onclick="closeModal()">${isEn?'Cancel':'रद्द करें'}</button>`);
 }
 
@@ -4630,10 +4709,16 @@ function clearProfilePhoto(){
 async function saveProfileEdits(){
   const name = (document.getElementById('profileNameInput')?.value||'').trim();
   if(!name){ toast('⚠️ Name required'); return; }
+  const dob = (document.getElementById('profileDobInput')?.value||'').trim();
+  const doj = (document.getElementById('profileDojInput')?.value||'').trim();
+  const salary = (document.getElementById('profileSalaryInput')?.value||'').trim();
+  const woff = (document.getElementById('profileWoffInput')?.value||'').trim();
+  const desig = (document.getElementById('profileDesigInput')?.value||'').trim();
   const btn = document.querySelector('.modal-box .submit-btn, .modal .submit-btn');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Saving…'; }
 
   try{
+    const empBefore = myEmp() || {};
     let photoUrl = SESSION.photoUrl || '';
     if(_profilePhotoData === ''){
       photoUrl = '';
@@ -4643,9 +4728,8 @@ async function saveProfileEdits(){
       if(typeof window._fbUploadSelfie === 'function'){
         const url = await window._fbUploadSelfie(_profilePhotoData, path);
         if(url) photoUrl = url;
-        else toast('⚠️ Photo upload failed — name will still save');
+        else toast('⚠️ Photo upload failed — other fields will still save');
       } else {
-        // Fallback: store small data URL in RTDB only if tiny
         if(_profilePhotoData.length < 200000) photoUrl = _profilePhotoData;
         else toast('⚠️ Storage not ready — try again');
       }
@@ -4655,31 +4739,66 @@ async function saveProfileEdits(){
     SESSION.photoUrl = photoUrl;
     try{ saveSession(); }catch(e){}
 
-    // Persist to mobileUsers + employee record
     const mob = _normMobileKey(SESSION.mobile||SESSION.uid||'');
     if(mob){
       try{
         await fbUpdate('mobileUsers/'+mob, {
           name,
           photoUrl: photoUrl || null,
+          dob: dob || null,
+          joiningDate: doj || null,
+          salary: salary || null,
+          woff: woff || null,
+          designation: desig || null,
           profileUpdatedAt: new Date().toISOString()
         });
-      }catch(e){ console.warn('mobileUsers photo', e); }
+      }catch(e){ console.warn('mobileUsers profile', e); }
     }
-    if(SESSION.empObjId){
+    const empId = SESSION.empObjId || empBefore.id;
+    if(empId){
       try{
-        await fbUpdate('employees/'+SESSION.empObjId, {
+        await fbUpdate('employees/'+empId, {
           name: name.toUpperCase(),
-          photoUrl: photoUrl || null
+          photoUrl: photoUrl || null,
+          dob: dob || null,
+          joiningDate: doj || null,
+          salary: salary || null,
+          woff: woff || null,
+          designation: desig || null
         });
-      }catch(e){ console.warn('emp photo', e); }
+      }catch(e){ console.warn('emp profile', e); }
     }
 
-    // Refresh header avatar
+    const changes = [];
+    if((empBefore.name||'') !== name) changes.push('Name');
+    if((empBefore.dob||'') !== dob) changes.push('DOB');
+    if((empBefore.joiningDate||empBefore.doj||'') !== doj) changes.push('DOJ');
+    if(String(empBefore.salary||'') !== String(salary||'')) changes.push('Salary');
+    if((empBefore.woff||'') !== woff) changes.push('Weekly Off');
+    if((empBefore.designation||'') !== desig) changes.push('Designation');
+    if(changes.length){
+      const body = name+' updated: '+changes.join(', ');
+      const mgrKey = _normMobileKey(SESSION.managerId||'');
+      if(mgrKey){
+        try{
+          await fbPush('userNotifications/'+mgrKey, {
+            type:'profile_update', title:'✏️ Profile update — '+name, body,
+            mobile: SESSION.mobile||'', name, changes, read:false, at: new Date().toISOString()
+          });
+        }catch(e){}
+      }
+      try{
+        await fbPush('adminNotifications', {
+          type:'profile_update', title:'✏️ Profile update — '+name, body,
+          mobile: SESSION.mobile||'', managerId: SESSION.managerId||'', read:false, at: new Date().toISOString()
+        });
+      }catch(e){}
+    }
+
     try{
       const userAvEl = document.getElementById('userAv');
       if(userAvEl){
-        if(photoUrl) userAvEl.innerHTML = `<img src="${photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+        if(photoUrl) userAvEl.innerHTML = `<img src="${photoUrl}" style="width:100%;height:100%;object-fit:cover">`;
         else userAvEl.textContent = name.split(' ').map(n=>n[0]).join('').substring(0,2);
       }
       const userNameEl = document.getElementById('userName');
@@ -4687,7 +4806,7 @@ async function saveProfileEdits(){
     }catch(e){}
 
     closeModal();
-    toast('✅ Profile saved');
+    toast(changes.length ? '✅ Profile saved — Manager notified' : '✅ Profile saved');
   }catch(err){
     console.error(err);
     toast('❌ Save failed: '+(err.message||err));
@@ -4797,9 +4916,25 @@ async function showProfile(){
       <div style="font-size:20px;font-weight:900;color:#fff">${SESSION.name}</div>
       <div style="font-size:12px;color:var(--muted2);margin-top:4px">${(SESSION.role==='manager'||SESSION.role==='member')?('📱 '+(SESSION.mobile||'—')):(SESSION.empId||'—')+' · '+secLabel}</div>
       <div style="margin-top:6px"><span style="background:rgba(249,115,22,.15);color:#f97316;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:800">${roleLabel}</span></div>
-      ${(SESSION.role==='manager'||SESSION.role==='member')?`<button class="profile-action" style="margin-top:14px" onclick="openEditProfileModal()">
+      ${(function(){
+        const er = empRec||{};
+        const rows = [
+          ['Emp Code', er.empId||er.code||SESSION.empId||'—'],
+          ['DOB', er.dob||'—'],
+          ['Date of Joining', er.joiningDate||er.doj||'—'],
+          ['Salary', (er.salary!=null&&er.salary!=='')?('₹ '+er.salary):'—'],
+          ['Weekly Off', er.woff||'—'],
+          ['Designation', er.designation||'—'],
+          ['Section', secLabel||er.sec||'—'],
+        ];
+        return '<div style="background:var(--panel);border:1px solid var(--border2);border-radius:14px;padding:12px 14px;margin:14px 0;text-align:left">'
+          +'<div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1px;margin-bottom:8px">MY DETAILS</div>'
+          +rows.map(([k,v])=>'<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px"><span style="color:var(--muted2)">'+k+'</span><span style="color:var(--text);font-weight:700">'+v+'</span></div>').join('')
+          +'</div>';
+      })()}
+      ${(SESSION.role==='manager'||SESSION.role==='member')?`<button class="profile-action" style="margin-top:6px" onclick="openEditProfileModal()">
         <div class="pa-icon" style="background:rgba(96,165,250,.12)">✏️</div>
-        <div><div class="pa-label">${(_lang==='en')?'Edit Profile':'Profile Edit करें'}</div><div class="pa-sub">${(_lang==='en')?'Name and photo':'नाम और फोटो बदलें'}</div></div>
+        <div><div class="pa-label">${(_lang==='en')?'Edit Profile':'Profile Edit करें'}</div><div class="pa-sub">${(_lang==='en')?'Name, DOB, DOJ, Salary, Weekly Off':'नाम, DOB, जॉइनिंग, सैलरी, वीकली ऑफ'}</div></div>
         <div class="pa-arrow">›</div>
       </button>`:''}
 
@@ -19620,28 +19755,9 @@ function skipFingerprint(){
 
 // Check if fingerprint is set up and session exists — show fp screen
 async function checkFingerprintOnStart(){
-  try{
-    const fpEnabled = localStorage.getItem(FP_KEY)==='1';
-    // Check all storage for session
-    let rawSession = localStorage.getItem('mp_session');
-    if(!rawSession){ const m=document.cookie.match(/mp_sess=([^;]+)/); if(m) rawSession=m[1]; }
-    
-    if(!rawSession) return false; // No session at all
-    
-    const sess = decodeSession(rawSession);
-    if(!sess || !sess.role) return false; // Invalid session
-    
-    // Session exists — check if fingerprint is set up
-    if(fpEnabled){
-      const available = await isBiometricAvailable();
-      if(available){
-        showFpScreen(); // Show fingerprint screen
-        return true;
-      }
-    }
-    // No fingerprint setup — launch directly
-    return false;
-  }catch(e){ return false; }
+  // Temporarily skip fingerprint gate — was leaving some devices on a black screen
+  // when FP UI failed to paint. Session will launchApp() directly.
+  return false;
 }
 
 function startApp(){
@@ -19688,26 +19804,46 @@ function startApp(){
 // something went wrong — force recover to login or app.
 // ══════════════════════════════════════════════════════════════
 // Early watchdog at 2s — catches fast failures
+function _isVisiblyBlank(){
+  try{
+    var login = document.getElementById('loginScreen');
+    var mc = document.getElementById('mainContent');
+    var mh = document.getElementById('mainHdr');
+    var ls = document.getElementById('loadingScreen');
+    var fp = document.getElementById('fingerprintScreen');
+    var loginOn = login && (login.classList.contains('show') || (login.style.display && login.style.display !== 'none'));
+    var appOn = (mc && mc.style.display && mc.style.display !== 'none') || (mh && mh.style.display && mh.style.display !== 'none');
+    var loadOn = ls && ls.style.display !== 'none' && ls.style.visibility !== 'hidden' && parseFloat(ls.style.opacity||'1')>0.1;
+    var fpOn = fp && (fp.classList.contains('show') || fp.style.display === 'flex');
+    if(loginOn || appOn || loadOn || fpOn) return false;
+    return true;
+  }catch(e){ return false; }
+}
+function _forceRecoverFromBlack(){
+  try{
+    console.warn('[RECOVER] forcing login UI');
+    if(typeof _showLoginScreenSafely==='function') _showLoginScreenSafely();
+    else {
+      var login=document.getElementById('loginScreen');
+      if(login){ login.style.display='flex'; login.classList.add('show'); }
+    }
+  }catch(e){}
+}
 setTimeout(function _earlyWatchdog(){
   try{
-    var mc = document.getElementById('mainContent');
     var ls = document.getElementById('loadingScreen');
-    var login = document.getElementById('loginScreen');
-    var fp = document.getElementById('fingerprintScreen');
-    if(ls && ls.style.display !== 'none'){
-      ls.style.cssText = 'display:none!important;opacity:0;pointer-events:none;visibility:hidden';
-    }
-    if(mc && mc.style.display !== 'none') return;
-    if(login && login.style.display && login.style.display !== 'none') return;
-    if(login && login.classList.contains('show')) return;
-    if(fp && (fp.classList.contains('show') || fp.style.display === 'flex')) return;
-    if(document.getElementById('hardExpiryWall')) return;
-    // Still black at 2s — if session exists, try launching
+    if(ls){ ls.style.cssText = 'display:none!important;opacity:0;pointer-events:none;visibility:hidden'; }
+    if(!_isVisiblyBlank()) return;
     if(typeof loadSession==='function' && loadSession() && SESSION.role){
-      if(typeof launchApp==='function') launchApp();
+      if(typeof launchApp==='function'){
+        Promise.resolve(launchApp()).catch(function(){ _forceRecoverFromBlack(); });
+        setTimeout(function(){ if(_isVisiblyBlank()) _forceRecoverFromBlack(); }, 1500);
+        return;
+      }
     }
-  }catch(ex){}
-}, 2000);
+    _forceRecoverFromBlack();
+  }catch(ex){ try{ _forceRecoverFromBlack(); }catch(e){} }
+}, 1500);
 
 setTimeout(function _blackScreenWatchdog(){
   try{
