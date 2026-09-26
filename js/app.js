@@ -73,7 +73,11 @@ const CFG = {
   contactAdmin:  '+918929394920',   // Admin — login approvals
   // Phone numbers that must always log in as Admin via OTP (10-digit or +91 form)
   hardAdminPhones: ['+918929397949', '+918929394920', '8929397949', '8929394920'],
+  // Manager self-registration invite code (not admin approval — spam gate only)
+  // Can also override via Firebase settings/managerInviteCode
+  managerInviteCode: 'METMGR',
 };
+
 
 
 const SEC = {
@@ -631,17 +635,23 @@ let TODAY_DATE = new Date();
 // ── WhatsApp opener — forces regular WhatsApp (com.whatsapp) on Android ──
 // Prevents WhatsApp Business from intercepting wa.me links
 function openWA(phone, text){
-  const encoded = encodeURIComponent(text);
-  const isAndroid = /android/i.test(navigator.userAgent);
-  if(isAndroid){
-    // intent:// forces Android to open ONLY com.whatsapp (regular WhatsApp)
-    // S.browser_fallback_url ensures graceful fallback if not installed
-    const fallback = encodeURIComponent('https://wa.me/91'+phone+'?text='+encoded);
-    const url = `intent://send?phone=91${phone}&text=${encoded}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${fallback};end`;
-    window.open(url, '_blank');
-  } else {
-    // iOS / Desktop — wa.me works fine
-    window.open('https://wa.me/91'+phone+'?text='+encoded, '_blank');
+  const ph = String(phone||'').replace(/\D/g,'');
+  const encoded = encodeURIComponent(text||'');
+  const web = 'https://wa.me/91'+ph+'?text='+encoded;
+  try{
+    const isAndroid = /android/i.test(navigator.userAgent);
+    if(isAndroid){
+      const fallback = encodeURIComponent(web);
+      const url = `intent://send?phone=91${ph}&text=${encoded}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${fallback};end`;
+      // Prefer same-tab navigation — more reliable than window.open (popup blockers)
+      try{ window.location.href = url; return; }catch(e){}
+      window.open(url, '_blank');
+    } else {
+      const w = window.open(web, '_blank');
+      if(!w){ try{ window.location.href = web; }catch(e){} }
+    }
+  }catch(e){
+    try{ window.location.href = web; }catch(e2){}
   }
 }
 TODAY_DATE.setHours(0,0,0,0);
@@ -762,16 +772,28 @@ async function initData(){
     ]);
 
     if(!existing){
+      // Only seed default plant roster when a hard-admin phone is signed in.
+      // Prevents a new Manager from writing the global DEFAULT_EMP list by accident.
+      let canSeed = false;
       try{
-        const empObj = {};
-        DEFAULT_EMP.forEach(e => empObj[e.id] = e);
-        await fbSet('employees', empObj);
-        await fbSet('instructions', DEFAULT_INSTRUCTIONS);
-        _cache.employees = mergeEmps(empObj);
-        toast('✅ Data initialized');
-      }catch(seedErr){
-        console.warn('[initData] seed skipped', seedErr);
-        _cache.employees = _cache.employees || [];
+        const ph = (window._fbAuth && window._fbAuth.currentUser && window._fbAuth.currentUser.phoneNumber) || '';
+        canSeed = (typeof _isHardAdminPhone === 'function' && _isHardAdminPhone(ph));
+      }catch(e){}
+      if(canSeed){
+        try{
+          const empObj = {};
+          DEFAULT_EMP.forEach(e => empObj[e.id] = e);
+          await fbSet('employees', empObj);
+          await fbSet('instructions', DEFAULT_INSTRUCTIONS);
+          _cache.employees = mergeEmps(empObj);
+          toast('✅ Data initialized');
+        }catch(seedErr){
+          console.warn('[initData] seed skipped', seedErr);
+          _cache.employees = _cache.employees || [];
+        }
+      } else {
+        _cache.employees = [];
+        console.warn('[initData] employees empty — waiting for Admin/Manager team data (no auto-seed)');
       }
     } else {
       _cache.employees = mergeEmps(existing);
@@ -1506,7 +1528,27 @@ function isSupervisor(){
   return emp && (emp.accessLevel==='supervisor' || emp.designation==='Supervisor');
 }
 function isAdminOrMgr(){ return isAdmin() || isMgr(); }
+
+/** Banner when Manager has not added any team members yet */
+function _managerEmptyTeamHtml(){
+  if(!(SESSION.role==='manager' || (typeof isMgr==='function' && isMgr()))) return '';
+  const n = (typeof getEmps==='function' ? getEmps() : []).filter(e=>e.status!=='resigned'&&e.status!=='left').length;
+  if(n > 0) return '';
+  const en = (typeof _lang!=='undefined' && _lang==='en');
+  return `<div class="hm-empty" style="margin:10px 12px;padding:14px;border-radius:12px;border:1px dashed rgba(249,115,22,.45);background:rgba(249,115,22,.08);text-align:left">
+    <div style="font-weight:900;color:var(--text);margin-bottom:4px">${en?'Your team is empty':'आपकी Team अभी खाली है'}</div>
+    <div style="font-size:12px;color:var(--muted2);line-height:1.5">${en
+      ? 'Managers only see staff they add. Open <b>Team</b> → <b>Add employee</b>. This is not a data loss bug.'
+      : 'Manager को सिर्फ वही कर्मचारी दिखते हैं जिन्हें वे खुद जोड़ते हैं। <b>Team</b> → <b>नया कर्मचारी जोड़ें</b>। यह data loss नहीं है।'}</div>
+  </div>`;
+}
+
 function isGuest(){ return SESSION.role==='guest'; }
+/** Team Member waiting for Manager approval — limited app access */
+function isPendingMember(){
+  return SESSION.role==='member' && (SESSION.pendingApproval===true || SESSION.status==='pending');
+}
+
 
 /** Team authorization levels (set by Manager on each member) */
 function _myEmployeeRecord(){
@@ -1533,7 +1575,7 @@ function myTeamPerms(){
   };
 }
 /** Manager of this team OR delegated schedule rights */
-function canEditSchedule(){ return isAdmin() || isMgr() || myTeamPerms().schedule; }
+function canEditSchedule(){ if(isPendingMember()) return false; return isAdmin() || isMgr() || myTeamPerms().schedule; }
 /** Approve leave for team */
 function canApproveLeave(){ return isAdmin() || isMgr() || myTeamPerms().leave; }
 /** File/act on reports about members */
@@ -1915,21 +1957,32 @@ function showExpiryWarning(daysLeft){
 // EXPIRY
 // ════════════════════════════════════════
 function checkLicense(){
+  try{
+    const unlock = localStorage.getItem('mp_license_unlock')||'';
+    if(unlock === CFG.license.masterKey || unlock === CFG.license.extendKey){
+      if(unlock === CFG.license.extendKey) CFG.license.expiry = CFG.license.extendTo;
+      return true;
+    }
+  }catch(e){}
   const now=new Date();now.setHours(0,0,0,0);
   const exp=new Date(CFG.license.expiry);exp.setHours(0,0,0,0);
   const diff=Math.floor((exp-now)/86400000);
   if(diff<0){
-    document.getElementById('expiryScreen').classList.add('show');
+    const el=document.getElementById('expiryScreen');
+    if(el) el.classList.add('show');
     return false;
   }
   return true;
 }
 async function tryUnlock(){
   const k=(document.getElementById('unlockKey').value||'').trim();
+  if(!k){ toast('❌ Key डालें'); return; }
   const kh = await hashPass(k);
   if(kh===CFG.license.masterKey||kh===CFG.license.extendKey){
     if(kh===CFG.license.extendKey) CFG.license.expiry=CFG.license.extendTo;
-    document.getElementById('expiryScreen').classList.remove('show');
+    try{ localStorage.setItem('mp_license_unlock', kh); }catch(e){}
+    const el=document.getElementById('expiryScreen');
+    if(el) el.classList.remove('show');
     toast('✅ अनलॉक हो गया');
   } else { toast('❌ गलत Key'); }
 }
@@ -2079,6 +2132,13 @@ async function _checkUserAfterOTP(){
     const userData=await fbGet('mobileUsers/'+mobile);
     if(userData){
       if(userData.status==='pending'){
+        // Team Member pending: enter app with limited tabs (Home shift + To-Do + Learn)
+        if(userData.role==='member'){
+          _launchAsNewUser(userData);
+          setTimeout(()=>{ try{ _watchApprovalStatus(mobile); }catch(e){} }, 800);
+          return;
+        }
+        // Legacy manager pending (should be rare after auto-approve)
         const pendMsg=document.getElementById('pendingMsg');
         const rLabel=userData.role==='manager'?'Manager':'Member';
         if(pendMsg) pendMsg.innerHTML='आपका <b>'+rLabel+'</b> रजिस्ट्रेशन (<b>'+userData.name+'</b>) pending है।<br><br>'
@@ -2123,6 +2183,19 @@ function _watchApprovalStatus(mobile){
     if(userData.status==='approved'){
       if(userData.validTill && new Date(userData.validTill)<new Date()) return false;
       _stopApprovalWatch();
+      // Already inside app as pending member → unlock full access without full re-login flash
+      if(SESSION && SESSION.role==='member' && SESSION.pendingApproval){
+        SESSION.status='approved';
+        SESSION.pendingApproval=false;
+        SESSION.name=userData.name||SESSION.name;
+        SESSION.managerId=userData.managerId||SESSION.managerId;
+        saveSession();
+        toast('✅ Manager ने approve कर दिया — full access!');
+        try{ buildNav().then(()=>{ goTab('home'); renderAll(); }); }catch(e){
+          try{ location.reload(); }catch(e2){}
+        }
+        return true;
+      }
       toast('✅ Approve हो गया! Login हो रहा है...');
       _launchAsNewUser(userData);
       return true;
@@ -2199,12 +2272,23 @@ async function _submitManagerReg(){
   if(desig==='Others') desig=(document.getElementById('mgrDesignationOther')?.value||'').trim();
   let dept=(document.getElementById('mgrDepartment')?.value||'').trim();
   if(dept==='Others') dept=(document.getElementById('mgrDepartmentOther')?.value||'').trim();
+  const invite=(document.getElementById('mgrInviteCode')?.value||'').trim();
   const errEl=document.getElementById('mgrRegErr');
   if(!name||!comp||!desig||!dept){
     if(errEl){ errEl.textContent='⚠️ सभी फ़ील्ड अनिवार्य हैं'; errEl.classList.add('show'); } return;
   }
+  // Invite code gate (spam protection) — still NO admin approval wait
+  let expectedCode = String(CFG.managerInviteCode||'METMGR').trim();
+  try{
+    const remote = await fbGet('settings/managerInviteCode');
+    if(remote && String(remote).trim()) expectedCode = String(remote).trim();
+  }catch(e){}
+  if(expectedCode && invite.toUpperCase() !== expectedCode.toUpperCase()){
+    if(errEl){ errEl.textContent='❌ गलत Invite Code — Admin से Code माँगें'; errEl.classList.add('show'); }
+    toast('❌ Invite Code गलत है');
+    return;
+  }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
-  // Manager: NO admin approval — auto-approved & logged in immediately
   const userData={
     role:'manager',
     name,
@@ -2219,7 +2303,6 @@ async function _submitManagerReg(){
   try{
     await fbSet('mobileUsers/'+mobile, userData);
 
-    // In-app notification for Admin
     const notifBody = name+' joined as Manager\nCompany: '+comp+'\nDept: '+dept+'\nMobile: '+(_loginMobile||mobile);
     try{
       await fbPush('adminNotifications', {
@@ -2234,7 +2317,6 @@ async function _submitManagerReg(){
     }catch(e){ console.warn('[mgrReg] adminNotifications', e); }
     try{ await notifyAdmin('🆕 New Manager joined', name+' · '+comp+' · '+(_loginMobile||mobile)); }catch(e){}
 
-    // WhatsApp to admin number — pre-filled join message
     const adminPhone = _normMobileKey(CFG.contactAdmin || '8929394920');
     const waText =
       '🆕 *New Manager joined — MET Power*\n\n'+
@@ -2244,12 +2326,15 @@ async function _submitManagerReg(){
       '*Designation:* '+desig+'\n'+
       '*Mobile:* '+(_loginMobile||('+91'+mobile))+'\n\n'+
       '_Auto-approved — no action required._';
+    // Store WA text so Admin can resend from notifications if popup blocked
+    try{ sessionStorage.setItem('mp_pending_mgr_wa', JSON.stringify({phone:adminPhone, text:waText})); }catch(e){}
     try{ openWA(adminPhone, waText); }catch(e){ console.warn('[mgrReg] WhatsApp', e); }
 
     toast('✅ Manager account ready — logging in...');
     _launchAsNewUser(userData);
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
+
 
 async function _submitMemberReg(){
   const name=(document.getElementById('memName')?.value||'').trim();
@@ -2265,17 +2350,29 @@ async function _submitMemberReg(){
     if(errEl){ errEl.textContent='⚠️ कृपया अपना Manager चुनें'; errEl.classList.add('show'); } return;
   }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
+  // Pending member: enter app immediately with LIMITED access until Manager approves
   const userData={role:'member',name,mobile:_loginMobile,company:comp,
     status:'pending',empCode:'',managerId,managerName,registeredAt:new Date().toISOString()};
   try{
     await fbSet('mobileUsers/'+mobile,userData);
-    await fbPush('adminNotifications',{type:'member_registration',...userData,
-      message:name+' ने Member के रूप में register किया। Manager: '+managerName});
-    const pendMsg=document.getElementById('pendingMsg');
-    if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Member रजिस्ट्रेशन हो गया है।<br><br>आपके Manager <b>'+managerName+'</b> अप्रूव करेंगे।';
-    showStep('pending');
-    _watchApprovalStatus(mobile);
-    toast('✅ Registration! Manager अप्रूव करेगा');
+    try{
+      await fbPush('adminNotifications',{type:'member_registration',...userData,
+        message:name+' ने Member के रूप में register किया। Manager: '+managerName});
+    }catch(e){}
+    // Notify selected manager (in-app) if path exists
+    try{
+      await fbPush('userNotifications/'+managerId, {
+        type:'member_pending',
+        title:'👤 New team member request',
+        body: name+' wants to join your team',
+        mobile:_loginMobile, name, company:comp,
+        read:false, at:new Date().toISOString()
+      });
+    }catch(e){}
+    toast('✅ Registered — limited access until Manager approves');
+    _launchAsNewUser(userData);
+    // Keep watching so when Manager approves, full access unlocks live
+    setTimeout(()=>{ try{ _watchApprovalStatus(mobile); }catch(e){} }, 800);
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
@@ -2320,6 +2417,8 @@ function _launchAsNewUser(userData){
   SESSION.mobile=userData.mobile;
   SESSION.empId=userData.empId||userData.empCode||'';
   SESSION.empObjId=userData.empObjId||userData.employeeId||'';
+  SESSION.status=userData.status||'approved';
+  SESSION.pendingApproval=(userData.role==='member' && userData.status==='pending');
   SESSION.newUser=true;
   SESSION.loginAt=new Date().toISOString();
   // Link to employees/{id} by mobile so in-app notifications work
@@ -3800,6 +3899,11 @@ async function launchApp(){
   if(isAdmin()){ rt.textContent='🛡️ ADMIN'; rt.className='role-tag admin'; }
   else if(isMgr() || SESSION.role==='manager'){ rt.textContent='🏅 MANAGER'; rt.className='role-tag'; rt.style.cssText='background:rgba(168,85,247,.2);color:#a855f7;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
   else if(isSupervisor()){ rt.textContent='👁️ SUPERVISOR'; rt.className='role-tag'; rt.style.cssText='background:rgba(56,189,248,.15);color:#38bdf8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
+    else if(isPendingMember()){
+    rt.textContent='⏳ PENDING';
+    rt.className='role-tag';
+    rt.style.cssText='background:rgba(234,179,8,.2);color:#eab308;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif';
+  }
   else if(SESSION.role==='member'){
     const tp = myTeamPerms();
     if(tp.schedule||tp.leave||tp.reports){
@@ -3884,11 +3988,11 @@ async function launchApp(){
 async function buildNav(){
   // ── ALL POSSIBLE TABS (master list) ──
   const ALL_TABS = [
-    {id:'home',      ico:'🏠', lbl:'होम',       lblEn:'Home',      roles:['worker','guest','manager','supervisor']},
-    {id:'schedule',  ico:'📅', lbl:'शेड्यूल',   lblEn:'Schedule',  roles:['worker','manager','supervisor']},
-    {id:'leave',     ico:'🏖️', lbl:'अवकाश',    lblEn:'Leave',     roles:['worker','manager']},
-    {id:'reports',   ico:'📋', lbl:'रिपोर्ट',   lblEn:'Reports',   roles:['worker','manager','supervisor']},
-    {id:'todo',      ico:'✅', lbl:'To-Do',      lblEn:'To-Do',     roles:['guest','worker','manager','supervisor']},
+    {id:'home',      ico:'🏠', lbl:'होम',       lblEn:'Home',      roles:['worker','guest','manager','supervisor','member','pending_member']},
+    {id:'schedule',  ico:'📅', lbl:'शेड्यूल',   lblEn:'Schedule',  roles:['worker','manager','supervisor','member']},
+    {id:'leave',     ico:'🏖️', lbl:'अवकाश',    lblEn:'Leave',     roles:['worker','manager','member']},
+    {id:'reports',   ico:'📋', lbl:'रिपोर्ट',   lblEn:'Reports',   roles:['worker','manager','supervisor','member']},
+    {id:'todo',      ico:'✅', lbl:'To-Do',      lblEn:'To-Do',     roles:['guest','worker','manager','supervisor','member','pending_member']},
     {id:'pending',   ico:'⏳', lbl:'पेंडिंग',   lblEn:'Pending',   roles:['admin','manager']},
     {id:'team',      ico:'👥', lbl:'टीम',        lblEn:'Team',      roles:['admin','manager']},
   ];
@@ -3901,12 +4005,23 @@ async function buildNav(){
   } catch(e){}
 
   // Determine effective role for nav
-  const effectiveRole = isAdmin() ? 'admin' : isMgr() ? 'manager' : isSupervisor() ? 'supervisor' : isGuest() ? 'guest' : 'worker';
+  // Pending Team Member: only Home (own shift) + To-Do (+ Learn header always on)
+  const effectiveRole = isAdmin() ? 'admin'
+    : isMgr() ? 'manager'
+    : isPendingMember() ? 'pending_member'
+    : (SESSION.role==='member') ? 'member'
+    : isSupervisor() ? 'supervisor'
+    : isGuest() ? 'guest'
+    : 'worker';
   let tabs;
   if(effectiveRole === 'admin'){
     tabs = ALL_TABS.filter(t => t.roles.includes('admin'));
   } else if(effectiveRole === 'manager'){
     tabs = ALL_TABS.filter(t => t.roles.includes('manager'));
+  } else if(effectiveRole === 'pending_member'){
+    tabs = ALL_TABS.filter(t => t.roles.includes('pending_member')); // home + todo only
+  } else if(effectiveRole === 'member'){
+    tabs = ALL_TABS.filter(t => t.roles.includes('member'));
   } else if(effectiveRole === 'supervisor'){
     tabs = ALL_TABS.filter(t => t.roles.includes('supervisor'));
   } else if(effectiveRole === 'worker'){
@@ -5045,6 +5160,14 @@ const _openModalOrig_ref = 'function openModal(html){';
 
 
 function goTab(t){
+  if(typeof isPendingMember==='function' && isPendingMember()){
+    const allowed = ['home','todo'];
+    if(t && !allowed.includes(t)){
+      toast('⏳ Manager approve होने तक सिर्फ Home / To-Do / Learn उपलब्ध हैं');
+      t = 'home';
+    }
+  }
+
   // Warn if leaving schedule tab with unsaved changes
   if(_currentTab==='schedule' && t!=='schedule' && Object.keys(_pendingShiftChanges).length>0){
     const n = Object.keys(_pendingShiftChanges).length;
@@ -5309,6 +5432,16 @@ function isMetPowerCompanyUser(){ return isAdmin() || SESSION.company === 'MET P
 // HOME / OVERVIEW
 // ════════════════════════════════════════
 async function renderHome(){
+  if(typeof isPendingMember==='function' && isPendingMember()){
+    try{
+      const roster = document.getElementById('homeRoster');
+      if(roster) roster.innerHTML = `<div class="hm-empty" style="padding:14px;margin:8px 0;border-radius:12px;border:1px dashed rgba(234,179,8,.5);background:rgba(234,179,8,.08)">
+        <div style="font-weight:900;color:var(--text);margin-bottom:6px">⏳ Manager approval pending</div>
+        <div style="font-size:12px;color:var(--muted2);line-height:1.5">आप Manager की approval का इंतज़ार कर रहे हैं। अभी सिर्फ <b>अपनी शिफ्ट</b>, <b>Learn &amp; Grow</b> और <b>To-Do</b> उपलब्ध हैं। Team schedule / Leave / Reports Manager approve के बाद खुलेंगे।</div>
+      </div>`;
+    }catch(e){}
+  }
+
   const emps=getEmps().filter(e=>e.status!=='resigned' && Array.isArray(e.ms) && e.ms.length > 0);
   const stillLoading = _cache.employees === null;
   const en = _lang==='en';
@@ -7470,6 +7603,7 @@ async function submitLeave(){
 
 async function actLeave(key, status){
   if(!canApproveLeave()){ toast('❌ Leave approve permission नहीं है'); return; }
+  if(!isAdmin() && !isMgr() && !myTeamPerms().leave){ toast('❌ Leave approve permission नहीं है'); return; }
   const leaves=getLeaves();
   const leave=leaves.find(l=>l._key===key);
   if(!leave) return;
@@ -9074,6 +9208,18 @@ function classifyResponsibility(resp){
 }
 
 function renderTeam(search=''){
+  try{
+    const host = document.getElementById('teamPage') || document.getElementById('teamList') || document.getElementById('teamBody');
+    if(host && !document.getElementById('mgrEmptyTeamBanner')){
+      const h = _managerEmptyTeamHtml();
+      if(h){ const d=document.createElement('div'); d.id='mgrEmptyTeamBanner'; d.innerHTML=h; host.prepend(d); }
+    } else if(host && document.getElementById('mgrEmptyTeamBanner')){
+      const h = _managerEmptyTeamHtml();
+      if(!h) document.getElementById('mgrEmptyTeamBanner').remove();
+      else document.getElementById('mgrEmptyTeamBanner').innerHTML=h;
+    }
+  }catch(e){}
+
   _renderDynamicChips('teamFilter', _buildMachineChips('team'), _teamSec, 'setTeamSec');
   document.getElementById('teamAddBtn').innerHTML = isAdminOrMgr()
     ? `<div style="display:flex;gap:8px;margin-bottom:14px">

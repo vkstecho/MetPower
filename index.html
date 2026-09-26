@@ -221,7 +221,9 @@ window.addEventListener('appinstalled', function () {
       <input class="inp-field" type="text" id="mgrName" placeholder="आपका नाम" autocomplete="off" style="margin-bottom:10px">
       <label class="inp-label">&#127970; Company का नाम *</label>
       <input class="inp-field" type="text" id="mgrCompany" placeholder="जैसे: ABC Industries" autocomplete="off" style="margin-bottom:10px">
-      <label class="inp-label">&#128188; Designation *</label>
+
+      <input class="inp-field" type="text" id="mgrInviteCode" placeholder="Invite Code (Admin से लें)" autocomplete="off" style="margin-bottom:10px" autocapitalize="characters">
+      <div style="font-size:11px;color:#94a3b8;margin:-4px 0 10px;line-height:1.4">Admin approval नहीं लगता — सिर्फ Invite Code चाहिए</div>      <label class="inp-label">&#128188; Designation *</label>
       <select class="inp-field" id="mgrDesignation" style="margin-bottom:10px" onchange="_toggleOtherField('mgrDesignation','mgrDesignationOther')">
         <option value="">-- चुनें --</option>
         <option value="Plant Manager">Plant Manager</option>
