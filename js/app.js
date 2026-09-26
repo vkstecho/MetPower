@@ -2023,8 +2023,60 @@ function showStep(n){
   allSteps.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
   const map={1:'loginStep1',2:'loginStep2',3:'loginStep3','admin':'adminLoginPanel',
     'mgrReg':'loginStepManagerReg','memReg':'loginStepMemberReg','pending':'loginStepPending'};
+  // Ensure login shell is visible (prevents black screen after OTP)
+  try{
+    const ls = document.getElementById('loginScreen');
+    if(ls){
+      ls.style.display = 'flex';
+      ls.classList.add('show');
+    }
+    const pb = document.getElementById('pendingBox');
+    if(pb && n !== 'pendingBox') pb.style.display = 'none';
+    const mh = document.getElementById('mainHdr');
+    const mc = document.getElementById('mainContent');
+    // When on login steps, keep main app hidden
+    if(n === 1 || n === 2 || n === 3 || n === 'admin' || n === 'mgrReg' || n === 'memReg' || n === 'pending'){
+      if(mh) mh.style.display = 'none';
+      if(mc) mc.style.display = 'none';
+    }
+  }catch(e){}
   const el=document.getElementById(map[n]); if(el) el.style.display='flex';
 }
+
+/** Full-screen pending overlay (outside loginScreen) — never black */
+function showPendingBox(msgHtml){
+  try{
+    const ls = document.getElementById('loginScreen');
+    if(ls){ ls.style.display='none'; ls.classList.remove('show'); }
+    const mh = document.getElementById('mainHdr');
+    const mc = document.getElementById('mainContent');
+    if(mh) mh.style.display='none';
+    if(mc) mc.style.display='none';
+    let pb = document.getElementById('pendingBox');
+    if(!pb){
+      pb = document.createElement('div');
+      pb.id = 'pendingBox';
+      pb.style.cssText = 'display:flex;position:fixed;inset:0;z-index:600;background:linear-gradient(160deg,#070c15 0%,#0d1623 45%,#130a24 100%);flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;';
+      document.body.appendChild(pb);
+    }
+    if(msgHtml){
+      const inner = pb.querySelector('[data-pending-msg]') || pb;
+      // update message block if present
+      const box = pb.querySelector('div[style*="line-height"]');
+      if(box) box.innerHTML = msgHtml;
+    }
+    pb.style.display = 'flex';
+  }catch(e){
+    console.error('showPendingBox', e);
+    try{ showStep('pending'); }catch(e2){}
+  }
+}
+function hidePendingBox(){
+  const pb = document.getElementById('pendingBox');
+  if(pb) pb.style.display = 'none';
+  showStep(1);
+}
+
 function backToStep1(){ _stopApprovalWatch(); showStep(1); }
 function showAdminLogin(){ showStep('admin'); setTimeout(()=>document.getElementById('aUser')?.focus(),100); }
 function checkGuestCompany(){}
@@ -2132,18 +2184,32 @@ async function _checkUserAfterOTP(){
     const userData=await fbGet('mobileUsers/'+mobile);
     if(userData){
       if(userData.status==='pending'){
-        // Team Member pending: enter app with limited tabs (Home shift + To-Do + Learn)
+        // Team Member pending → limited app (never black, never stuck silent screen)
         if(userData.role==='member'){
-          _launchAsNewUser(userData);
+          try{
+            await _launchAsNewUser(userData);
+          }catch(e){
+            console.error('[otp] pending member launch', e);
+            showPendingBox('आपका Member registration <b>pending</b> है। Manager approve होने तक सीमित access।<br><br>कृपया page refresh करके दोबारा OTP try करें।');
+          }
           setTimeout(()=>{ try{ _watchApprovalStatus(mobile); }catch(e){} }, 800);
           return;
         }
-        // Legacy manager pending (should be rare after auto-approve)
-        const pendMsg=document.getElementById('pendingMsg');
+        // Manager or other pending → clear waiting UI (not black)
         const rLabel=userData.role==='manager'?'Manager':'Member';
-        if(pendMsg) pendMsg.innerHTML='आपका <b>'+rLabel+'</b> रजिस्ट्रेशन (<b>'+userData.name+'</b>) pending है।<br><br>'
-          +(userData.role==='manager'?'VKS Tech Admin वेरिफाई करेगा।':'आपका Manager अप्रूव करेगा।');
-        showStep('pending'); _watchApprovalStatus(mobile); return;
+        const name = userData.name || mobile;
+        const msg = userData.role==='manager'
+          ? ('आपका <b>Manager</b> registration (<b>'+name+'</b>) Admin approval का इंतज़ार कर रहा है।')
+          : ('आपका registration (<b>'+name+'</b>) approval का इंतज़ार कर रहा है।');
+        try{
+          const pendMsg=document.getElementById('pendingMsg');
+          if(pendMsg) pendMsg.innerHTML=msg+'<br><br>'+(userData.role==='manager'?'VKS Tech Admin वेरिफाई करेगा।':'आपका Manager अप्रूव करेगा।');
+          showStep('pending');
+        }catch(e){
+          showPendingBox(msg);
+        }
+        _watchApprovalStatus(mobile);
+        return;
       }
       if(userData.status==='rejected'){
         toast('❌ आपका रजिस्ट्रेशन reject हो गया। VKS Tech से संपर्क करें।'); return;
@@ -2437,8 +2503,25 @@ function _launchAsNewUser(userData){
   }catch(e){}
   saveSession();
   try{ writeIntegrityToken(); localStorage.setItem('mp_int_ok','1'); }catch(e){}
-  launchApp();
-  // Managers need managers/{uid}=true in RTDB for shiftConfigs write rules
+  try{
+    // Show shell immediately so OTP never ends on a black page
+    const _mh = document.getElementById('mainHdr');
+    const _mc = document.getElementById('mainContent');
+    if(_mh) _mh.style.display='block';
+    if(_mc) _mc.style.display='block';
+    const ls = document.getElementById('loginScreen');
+    if(ls){ ls.style.display='none'; ls.classList.remove('show'); }
+    const pb = document.getElementById('pendingBox');
+    if(pb) pb.style.display='none';
+  }catch(e){}
+  Promise.resolve(launchApp()).catch(err=>{
+    console.error('[launch] failed', err);
+    try{
+      document.getElementById('mainHdr').style.display='block';
+      document.getElementById('mainContent').style.display='block';
+      toast('⚠️ App load issue — pull to refresh if screen is empty');
+    }catch(e){}
+  });
   setTimeout(()=>{ try{ _syncAuthRoleNodes(); }catch(e){} }, 500);
   setTimeout(()=>{ try{ _resolveSessionEmpLink(); _syncAuthRoleNodes(); }catch(e){} }, 1500);
   setTimeout(()=>{ try{ _resolveSessionEmpLink(); listenUserShiftNotifications(); _syncAuthRoleNodes(); }catch(e){} }, 4000);
@@ -3888,18 +3971,25 @@ async function launchApp(){
 
   const ini=(SESSION.name||'?').split(' ').map(n=>n[0]).join('').substring(0,2);
   const userAvEl=document.getElementById('userAv');
-  if(SESSION.photoUrl){
-    userAvEl.innerHTML=`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
-  }else{
-    userAvEl.textContent=ini;
+  if(userAvEl){
+    if(SESSION.photoUrl){
+      userAvEl.innerHTML=`<img src="${SESSION.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`;
+    }else{
+      userAvEl.textContent=ini;
+    }
   }
-  document.getElementById('userHdrName').textContent=(SESSION.name||'Guest').split(' ')[0];
+  const hdrName=document.getElementById('userHdrName');
+  if(hdrName) hdrName.textContent=(SESSION.name||'Guest').split(' ')[0];
+
+  // Hide pending overlay if we successfully entered the app
+  try{ const pb=document.getElementById('pendingBox'); if(pb) pb.style.display='none'; }catch(e){}
 
   const rt=document.getElementById('roleTag');
+  if(rt){
   if(isAdmin()){ rt.textContent='🛡️ ADMIN'; rt.className='role-tag admin'; }
   else if(isMgr() || SESSION.role==='manager'){ rt.textContent='🏅 MANAGER'; rt.className='role-tag'; rt.style.cssText='background:rgba(168,85,247,.2);color:#a855f7;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
   else if(isSupervisor()){ rt.textContent='👁️ SUPERVISOR'; rt.className='role-tag'; rt.style.cssText='background:rgba(56,189,248,.15);color:#38bdf8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; }
-    else if(isPendingMember()){
+  else if(isPendingMember()){
     rt.textContent='⏳ PENDING';
     rt.className='role-tag';
     rt.style.cssText='background:rgba(234,179,8,.2);color:#eab308;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif';
@@ -3925,6 +4015,7 @@ async function launchApp(){
     rt.style.cssText='background:rgba(148,163,184,.15);color:#94a3b8;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;font-family:Barlow Condensed,sans-serif'; 
   }
   else { rt.textContent='👤 USER'; rt.className='role-tag user'; }
+  } // end roleTag null-safe
 
   if(isAdmin()){
     document.getElementById('notifBtn').style.display='flex';
@@ -4015,7 +4106,11 @@ async function buildNav(){
     : 'worker';
   let tabs;
   if(effectiveRole === 'admin'){
-    tabs = ALL_TABS.filter(t => t.roles.includes('admin'));
+    // Admin sees management tabs + worker views
+    tabs = ALL_TABS.filter(t => t.roles.includes('admin') || t.roles.includes('manager') || t.roles.includes('worker'));
+    // de-dupe by id
+    const seen=new Set();
+    tabs = tabs.filter(t => { if(seen.has(t.id)) return false; seen.add(t.id); return true; });
   } else if(effectiveRole === 'manager'){
     tabs = ALL_TABS.filter(t => t.roles.includes('manager'));
   } else if(effectiveRole === 'pending_member'){
@@ -4036,7 +4131,10 @@ async function buildNav(){
     });
   }
 
-  const firstTab = (effectiveRole==='admin' && tabs.some(t=>t.id==='pending')) ? 'pending' : tabs[0].id;
+  if(!tabs || !tabs.length){
+    tabs = [{id:'home', ico:'🏠', lbl:'होम', lblEn:'Home', roles:['worker']}];
+  }
+  const firstTab = (effectiveRole==='admin' && tabs.some(t=>t.id==='pending')) ? 'pending' : (tabs[0]&&tabs[0].id) || 'home';
   _currentTab = firstTab;
 
   // Hide sync row for guest users (irrelevant for guests)
