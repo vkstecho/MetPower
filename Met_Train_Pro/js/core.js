@@ -112,18 +112,18 @@ function rLanding(pg){
     +'<div style="text-align:center;margin-bottom:30px;width:100%">'
     +'<img src="Met_Train_Pro/assets/logo-icon.svg" alt="Met Train PRO" width="76" height="76" style="display:block;margin:0 auto 16px;border-radius:18px;box-shadow:0 0 40px rgba(37,211,102,.3)">'
     +'<div style="font-family:\'Rajdhani\',sans-serif;font-size:36px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#fff;line-height:1">Met Train <span style="color:#f0a500">PRO</span></div>'
-    +'<div style="font-size:14px;color:#506070;margin-top:6px;font-family:\'Mukta\',\'Hind\',sans-serif">वैक्युम मेटलाइज़ेशन ट्रेनिंग प्लेटफॉर्म</div>'
+    +'<div style="font-size:14px;color:#506070;margin-top:6px;font-family:\'Mukta\',\'Hind\',sans-serif">फ्लोर-रेडी मेटलाइज़र ट्रेनिंग — OD · Vacuum · Defects · SOPs</div>'
     +'<div style="width:60px;height:3px;background:linear-gradient(90deg,#f0a500,#e06030);border-radius:2px;margin:14px auto 0"></div>'
     +'</div>'
 
-    +'<div style="font-size:15px;color:rgba(204,216,232,.45);text-align:center;margin-bottom:24px;font-style:italic;font-family:\'Mukta\',\'Hind\',sans-serif">आप कौन हैं? नीचे अपना विकल्प चुनें 👇</div>'
+    +'<div style="font-size:15px;color:rgba(204,216,232,.45);text-align:center;margin-bottom:24px;font-style:italic;font-family:\'Mukta\',\'Hind\',sans-serif">शिफ्ट शुरू करने से पहले — अपना मोड चुनें 👇</div>'
 
     // Button
     +'<button onclick="enterFree()" style="width:100%;max-width:420px;background:linear-gradient(135deg,rgba(24,201,122,.15),rgba(24,201,122,.06));border:2px solid rgba(24,201,122,.5);border-radius:18px;padding:20px 18px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:14px;transition:all .2s;margin-bottom:16px;font-family:inherit" ontouchstart="" onmousedown="this.style.transform=\'scale(.97)\'" onmouseup="this.style.transform=\'\'" onmouseleave="this.style.transform=\'\'">'
     +'<div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,rgba(24,201,122,.3),rgba(24,201,122,.1));display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0">🏭</div>'
     +'<div style="flex:1">'
     +'<div style="font-family:\'Rajdhani\',sans-serif;font-size:20px;font-weight:900;color:#18c97a;margin-bottom:3px;text-transform:uppercase;letter-spacing:.03em">कर्मचारी</div>'
-    +'<div style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.5;font-family:\'Mukta\',\'Hind\',sans-serif">मेटलाइज़र प्लांट ऑपरेटर — Metalliser · Slitter · SOPs · SAP · PM</div>'
+    +'<div style="font-size:12px;color:rgba(255,255,255,.5);line-height:1.5;font-family:\'Mukta\',\'Hind\',sans-serif">ऑपरेटर / सुपरवाइज़र — Defect fix · SOP · PM · SAP · Quiz</div>'
     +'<div style="margin-top:8px;display:inline-block;background:rgba(24,201,122,.2);border:1px solid rgba(24,201,122,.4);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:900;color:#18c97a;font-family:\'Share Tech Mono\',monospace">✓ बिल्कुल FREE</div>'
     +'</div>'
     +'<div style="font-size:24px;color:rgba(24,201,122,.5)">›</div>'
@@ -282,14 +282,14 @@ function updateTopbar(){
 function rHome(pg){
   var g=MODE==='free';
   var cards=[
-    {id:'defect',ico:'🔴',t:'डिफेक्ट Action Plans',d:'16 defects — Low OD, Pinholes, Wrinkles, Web Break — हर समस्या का Step-by-Step समाधान।',cc:'#e53935',m:'16 Action Plans'},
-    {id:'quiz',ico:'📝',t:'ज्ञान परीक्षा',d:'50 MCQ प्रश्न — मेटलाइज़ेशन, स्लिटिंग, सुरक्षा, 5S, TPM, Kaizen, KPI।',cc:'var(--orange)',m:'50 प्रश्न'},
-    {id:'met',ico:'⚡',t:'मेटलाइज़र ऑपरेशन',d:'वैक्युम मेटलाइज़ेशन: चेंबर, बोट, रोल हैंडलिंग, पैरामीटर, AlBond, CPP, AlOx की पूरी जानकारी।',cc:'var(--gold)',m:'8 विषय'},
+    {id:'defect',ico:'🔴',t:'डिफेक्ट Action Plans',d:'OD कम? Pinhole? Web break? — 30 सेकंड में #1 कारण + Step-by-Step fix। शिफ्ट में फटाफट काम आता है।',cc:'#e53935',m:'16 Action Plans'},
+    {id:'quiz',ico:'📝',t:'ज्ञान परीक्षा',d:'50 MCQ — Process · Safety · GMP · 5S। शिफ्ट से पहले 10 मिनट — खुद का स्तर चेक करो।',cc:'var(--orange)',m:'50 प्रश्न'},
+    {id:'met',ico:'⚡',t:'मेटलाइज़र ऑपरेशन',d:'Chamber · Boat · Wire · OD · Plasma · Drum — AlBond / CPP / AlOx तक पूरा फ्लोर ज्ञान।',cc:'var(--gold)',m:'8 विषय'},
     {id:'slit',ico:'✂️',t:'स्लिटर ऑपरेशन',d:'मशीन सेटअप, ब्लेड, कॉर्क टेप, क्रिटिकल कस्टमर, ग्रेडिंग और जॉइंट की जानकारी।',cc:'var(--cyan)',m:'7 विषय'},
-    {id:'safety',ico:'🦺',t:'सुरक्षा एवं GMP',d:'PPE, मूविंग पार्ट्स, एल्युमीनियम धूल के खतरे और GMP हाइजीन — सभी के लिए अनिवार्य।',cc:'var(--red)',m:'⚠️ अनिवार्य'},
+    {id:'safety',ico:'🦺',t:'सुरक्षा एवं GMP',d:'Al धूल + पानी = आग खतरा। PPE · LOTO · Moving parts — हर ऑपरेटर के लिए अनिवार्य।',cc:'var(--red)',m:'⚠️ अनिवार्य'},
     {id:'sops',ico:'📋',t:'SOPs एवं WIs',d:'10 SOPs, 25+ WIs, 15+ Formats — मेटलाइज़ेशन और स्लिटिंग की पूरी दस्तावेज़ लाइब्रेरी।',cc:'var(--blue)',m:'25+ दस्तावेज़'},
     {id:'terms',ico:'📚',t:'औद्योगिक शब्दावली',d:'SOP, WI, 5S, TPM के 8 Pillars, Kaizen, KPI, OEE, Lean — हिंदी में पूर्ण व्याख्या।',cc:'var(--purple)',m:'50+ शब्द'},
-    {id:'check',ico:'✅',t:'प्री-स्टार्ट चेकलिस्ट',d:'इंटरैक्टिव ऑपरेटर चेकलिस्ट — सुरक्षा, मशीन, मटेरियल — 27 बिंदु।',cc:'var(--green)',m:'27 बिंदु'},
+    {id:'check',ico:'✅',t:'प्री-स्टार्ट चेकलिस्ट',d:'शिफ्ट स्टार्ट से पहले 27 बिंदु — Safety · Machine · Material। टिक करो, भूलो मत।',cc:'var(--green)',m:'27 बिंदु'},
     {id:'manuals',ico:'📖',t:'OEM मैनुअल लाइब्रेरी',d:'296 Equipment Manuals — Drives, PLC, Sensors, Pumps, Bearings — PDF Viewer में पढ़ें।',cc:'var(--blue)',m:'296 PDF मैनुअल'}
   ];
   if(g){
