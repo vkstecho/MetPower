@@ -634,24 +634,43 @@ let TODAY_DATE = new Date();
 
 // ── WhatsApp opener — forces regular WhatsApp (com.whatsapp) on Android ──
 // Prevents WhatsApp Business from intercepting wa.me links
+/** Open WhatsApp WITHOUT navigating away from the app (never use location.href).
+ *  Same-tab navigation was causing black screen after Manager registration / OTP.
+ */
 function openWA(phone, text){
   const ph = String(phone||'').replace(/\D/g,'');
+  if(!ph) return;
   const encoded = encodeURIComponent(text||'');
   const web = 'https://wa.me/91'+ph+'?text='+encoded;
   try{
     const isAndroid = /android/i.test(navigator.userAgent);
+    let opened = null;
     if(isAndroid){
+      // intent URL in a NEW window/tab only — never replace this page
       const fallback = encodeURIComponent(web);
-      const url = `intent://send?phone=91${ph}&text=${encoded}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${fallback};end`;
-      // Prefer same-tab navigation — more reliable than window.open (popup blockers)
-      try{ window.location.href = url; return; }catch(e){}
-      window.open(url, '_blank');
+      const intentUrl = `intent://send?phone=91${ph}&text=${encoded}#Intent;scheme=whatsapp;package=com.whatsapp;S.browser_fallback_url=${fallback};end`;
+      try{ opened = window.open(intentUrl, '_blank'); }catch(e){}
+      if(!opened){
+        try{ opened = window.open(web, '_blank'); }catch(e){}
+      }
     } else {
-      const w = window.open(web, '_blank');
-      if(!w){ try{ window.location.href = web; }catch(e){} }
+      try{ opened = window.open(web, '_blank'); }catch(e){}
+    }
+    // Popup blocked: show a tappable link toast — do NOT navigate this tab
+    if(!opened){
+      try{
+        const tip = document.createElement('div');
+        tip.id = 'waFallbackTip';
+        tip.style.cssText = 'position:fixed;left:12px;right:12px;bottom:20px;z-index:99999;background:#0f172a;border:1px solid #22c55e;border-radius:12px;padding:12px 14px;color:#e2e8f0;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4)';
+        tip.innerHTML = 'WhatsApp message ready — <a href="'+web+'" target="_blank" rel="noopener" style="color:#4ade80;font-weight:800">Tap to open WhatsApp</a> <button type="button" style="float:right;background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer" onclick="this.parentElement.remove()">✕</button>';
+        const old = document.getElementById('waFallbackTip');
+        if(old) old.remove();
+        document.body.appendChild(tip);
+        setTimeout(()=>{ try{ tip.remove(); }catch(e){} }, 20000);
+      }catch(e){ console.warn('[openWA] popup blocked', e); }
     }
   }catch(e){
-    try{ window.location.href = web; }catch(e2){}
+    console.warn('[openWA]', e);
   }
 }
 TODAY_DATE.setHours(0,0,0,0);
@@ -2394,10 +2413,14 @@ async function _submitManagerReg(){
       '_Auto-approved — no action required._';
     // Store WA text so Admin can resend from notifications if popup blocked
     try{ sessionStorage.setItem('mp_pending_mgr_wa', JSON.stringify({phone:adminPhone, text:waText})); }catch(e){}
-    try{ openWA(adminPhone, waText); }catch(e){ console.warn('[mgrReg] WhatsApp', e); }
 
     toast('✅ Manager account ready — logging in...');
+    // Login first — WhatsApp must NOT interrupt / navigate away
     _launchAsNewUser(userData);
+    // Open WA after app is visible (new window only)
+    setTimeout(()=>{
+      try{ openWA(adminPhone, waText); }catch(e){ console.warn('[mgrReg] WhatsApp', e); }
+    }, 1500);
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
