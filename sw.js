@@ -2,7 +2,7 @@
    - Fixed infinite reload loop
    - Never deletes glsmp-integrity (session integrity token) on activate
 */
-const CACHE = 'metpower-v6';
+const CACHE = 'metpower-v9';
 const KEEP_CACHES = new Set([CACHE, 'glsmp-integrity']);
 const PRECACHE = [
   './',

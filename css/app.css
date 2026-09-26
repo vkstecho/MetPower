@@ -2774,3 +2774,70 @@ body.light .team-btn-delete {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
+
+
+/* ══ Login: Manager / Team Member role choice — high contrast ══ */
+.role-pick-heading{
+  font-size:18px;
+  font-weight:900;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  margin-bottom:4px;
+}
+.role-pick-card{
+  background:#1e293b !important;
+  border:1.5px solid rgba(148,163,184,.35) !important;
+  border-radius:14px;
+  padding:16px;
+  cursor:pointer;
+  transition:border-color .2s, background .2s, box-shadow .2s;
+  margin-bottom:10px;
+}
+.role-pick-card:active,
+.role-pick-card:hover{
+  border-color:#f97316 !important;
+  background:rgba(249,115,22,.12) !important;
+  box-shadow:0 0 0 1px rgba(249,115,22,.25);
+}
+.role-pick-ico{
+  font-size:28px;
+  margin-bottom:6px;
+  line-height:1;
+}
+.role-pick-title{
+  font-size:16px;
+  font-weight:900;
+  color:#f8fafc !important;
+  -webkit-text-fill-color:#f8fafc !important;
+  letter-spacing:.2px;
+}
+.role-pick-sub{
+  font-size:13px;
+  font-weight:600;
+  color:#cbd5e1 !important;
+  -webkit-text-fill-color:#cbd5e1 !important;
+  margin-top:4px;
+  line-height:1.45;
+}
+body.light .role-pick-card{
+  background:#1e293b !important;
+  border-color:rgba(148,163,184,.4) !important;
+}
+body.light .role-pick-title,
+body.light .role-pick-heading{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+}
+body.light .role-pick-sub{
+  color:#e2e8f0 !important;
+  -webkit-text-fill-color:#e2e8f0 !important;
+}
+#loginScreen .role-pick-title,
+#loginScreen .role-pick-heading{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+}
+#loginScreen .role-pick-sub{
+  color:#e2e8f0 !important;
+  -webkit-text-fill-color:#e2e8f0 !important;
+}

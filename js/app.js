@@ -71,7 +71,10 @@ const CFG = {
   // ── Contact numbers (update here, applies everywhere) ──
   contactVivek:  '+918168771239',   // Manager VIVEK — device approvals, access extensions
   contactAdmin:  '+918929394920',   // Admin — login approvals
+  // Phone numbers that must always log in as Admin via OTP (10-digit or +91 form)
+  hardAdminPhones: ['+918929397949', '+918929394920', '8929397949', '8929394920'],
 };
+
 
 const SEC = {
   M1: {label:'Metalliser-1',hi:'मेटलाइज़र-1',color:'var(--m1)',bg:'var(--m1bg)',icon:'🏭',machine:'M-1',type:'metalliser'},
@@ -1169,6 +1172,34 @@ async function saveShiftConfig(cfg,keyOverride){
   cfg.updatedAt=new Date().toISOString();
   cfg.updatedBy=SESSION.name;
   try{
+    // Ensure managers/{uid} + phone auth so RTDB rules allow the write
+    if(typeof _ensureWriteAuth === 'function'){
+      const authOk = await _ensureWriteAuth();
+      if(!authOk){
+        toast('❌ Login/OTP needed to save settings');
+        return false;
+      }
+    }
+    try{ await _syncAuthRoleNodes(); }catch(e){}
+    // If manager in session but mobileUsers still pending, upgrade to approved (rules allow self-upgrade for manager)
+    try{
+      if(SESSION.role==='manager' && SESSION.mobile){
+        const mob = _normMobileKey(SESSION.mobile);
+        if(mob){
+          const existing = await fbGet('mobileUsers/'+mob);
+          if(existing && existing.role==='manager' && existing.status!=='approved'){
+            await fbSet('mobileUsers/'+mob, {...existing, status:'approved', autoApproved:true});
+          } else if(!existing){
+            await fbSet('mobileUsers/'+mob, {
+              role:'manager', name:SESSION.name||'', mobile:SESSION.mobile,
+              company:SESSION.company||'', status:'approved', autoApproved:true,
+              registeredAt:new Date().toISOString()
+            });
+          }
+          await _syncAuthRoleNodes();
+        }
+      }
+    }catch(e){ console.warn('[saveShiftConfig] mobileUsers ensure', e); }
     await fbSet('shiftConfigs/'+key.replace(/[:.#$\[\]]/g,'_'),cfg);
     _shiftConfigCache[key]=cfg;
     return true;
@@ -1445,7 +1476,24 @@ function _translateDOM(){
   });
 }
 setTimeout(applyLang, 200);
-function isAdmin(){ return SESSION.role==='admin'; }
+function isAdmin(){
+  if(SESSION.role==='admin') return true;
+  // OTP hard-admin phones always treated as Admin even if mobileUsers had another role
+  if(SESSION.mobile && typeof _isHardAdminPhone==='function' && _isHardAdminPhone(SESSION.mobile)) return true;
+  if(SESSION.uid && typeof _isHardAdminPhone==='function' && _isHardAdminPhone(SESSION.uid)) return true;
+  return false;
+}
+function _isHardAdminPhone(mobile){
+  const key = (typeof _normMobileKey==='function')
+    ? _normMobileKey(mobile)
+    : String(mobile||'').replace('+91','').replace(/[^0-9]/g,'');
+  if(!key) return false;
+  const list = (CFG.hardAdminPhones||[]).map(p =>
+    (typeof _normMobileKey==='function') ? _normMobileKey(p) : String(p||'').replace('+91','').replace(/[^0-9]/g,'')
+  );
+  return list.includes(key);
+}
+
 function isMgr(){ 
   if(SESSION.role==='admin') return false;
   if(SESSION.role==='manager') return true; // new mobile self-registration Manager
@@ -2023,6 +2071,11 @@ async function _verifyOTP(){
 async function _checkUserAfterOTP(){
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
   try{
+    // Hard-coded Admin phones → always Admin (full team), not User/Member from mobileUsers
+    if(_isHardAdminPhone(mobile) || _isHardAdminPhone(_loginMobile)){
+      _launchAsHardAdmin(mobile);
+      return;
+    }
     const userData=await fbGet('mobileUsers/'+mobile);
     if(userData){
       if(userData.status==='pending'){
@@ -2151,17 +2204,50 @@ async function _submitManagerReg(){
     if(errEl){ errEl.textContent='⚠️ सभी फ़ील्ड अनिवार्य हैं'; errEl.classList.add('show'); } return;
   }
   const mobile=_loginMobile.replace('+91','').replace(/[^0-9]/g,'');
-  const userData={role:'manager',name,mobile:_loginMobile,company:comp,
-    designation:desig,department:dept,status:'pending',registeredAt:new Date().toISOString()};
+  // Manager: NO admin approval — auto-approved & logged in immediately
+  const userData={
+    role:'manager',
+    name,
+    mobile:_loginMobile,
+    company:comp,
+    designation:desig,
+    department:dept,
+    status:'approved',
+    registeredAt:new Date().toISOString(),
+    autoApproved:true
+  };
   try{
-    await fbSet('mobileUsers/'+mobile,userData);
-    await fbPush('adminNotifications',{type:'manager_registration',...userData,
-      message:name+' ने Manager के रूप में register किया। Company: '+comp});
-    const pendMsg=document.getElementById('pendingMsg');
-    if(pendMsg) pendMsg.innerHTML='<b>'+name+'</b>, आपका Manager रजिस्ट्रेशन हो गया है।<br><br>VKS Tech Admin वेरिफाई करेगा।';
-    showStep('pending');
-    _watchApprovalStatus(mobile);
-    toast('✅ Registration! Admin अप्रूव करेगा');
+    await fbSet('mobileUsers/'+mobile, userData);
+
+    // In-app notification for Admin
+    const notifBody = name+' joined as Manager\nCompany: '+comp+'\nDept: '+dept+'\nMobile: '+(_loginMobile||mobile);
+    try{
+      await fbPush('adminNotifications', {
+        type:'manager_joined',
+        title:'🆕 New Manager joined',
+        body: notifBody,
+        name, company:comp, department:dept, mobile:_loginMobile||mobile,
+        message: name+' ने Manager के रूप में join किया। Company: '+comp,
+        read:false,
+        at: new Date().toISOString()
+      });
+    }catch(e){ console.warn('[mgrReg] adminNotifications', e); }
+    try{ await notifyAdmin('🆕 New Manager joined', name+' · '+comp+' · '+(_loginMobile||mobile)); }catch(e){}
+
+    // WhatsApp to admin number — pre-filled join message
+    const adminPhone = _normMobileKey(CFG.contactAdmin || '8929394920');
+    const waText =
+      '🆕 *New Manager joined — MET Power*\n\n'+
+      '*Name:* '+name+'\n'+
+      '*Company:* '+comp+'\n'+
+      '*Department:* '+dept+'\n'+
+      '*Designation:* '+desig+'\n'+
+      '*Mobile:* '+(_loginMobile||('+91'+mobile))+'\n\n'+
+      '_Auto-approved — no action required._';
+    try{ openWA(adminPhone, waText); }catch(e){ console.warn('[mgrReg] WhatsApp', e); }
+
+    toast('✅ Manager account ready — logging in...');
+    _launchAsNewUser(userData);
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
@@ -2193,7 +2279,38 @@ async function _submitMemberReg(){
   }catch(e){ if(errEl){ errEl.textContent='❌ Error: '+e.message; errEl.classList.add('show'); } }
 }
 
+/** Launch session as full Admin from OTP (hard-admin phone list) */
+function _launchAsHardAdmin(mobile10){
+  const key = _normMobileKey(mobile10||_loginMobile||'');
+  SESSION = {
+    uid: '+91'+key,
+    name: 'ADMIN',
+    role: 'admin',
+    company: '',
+    companyId: 'ALL',
+    viewCompanyId: 'ALL',
+    managerId: '',
+    mobile: '+91'+key,
+    empId: '',
+    empObjId: '',
+    newUser: false,
+    loginAt: new Date().toISOString()
+  };
+  try{ writeIntegrityToken(); localStorage.setItem('mp_int_ok','1'); }catch(e){}
+  saveSession();
+  try{ _syncAuthRoleNodes(); }catch(e){}
+  toast('✅ Admin login');
+  launchApp();
+  setTimeout(()=>{ try{ _syncAuthRoleNodes(); }catch(e){} }, 1500);
+}
+
 function _launchAsNewUser(userData){
+  // Safety: never demote hard-admin phone to member/manager
+  const mob = _normMobileKey(userData.mobile||userData.uid||'');
+  if(_isHardAdminPhone(mob)){
+    _launchAsHardAdmin(mob);
+    return;
+  }
   SESSION.uid=userData.mobile;
   SESSION.name=userData.name;
   SESSION.role=userData.role;
@@ -2220,10 +2337,12 @@ function _launchAsNewUser(userData){
     }
   }catch(e){}
   saveSession();
+  try{ writeIntegrityToken(); localStorage.setItem('mp_int_ok','1'); }catch(e){}
   launchApp();
-  // Resolve emp link after employees load (cache may still be empty at login)
-  setTimeout(()=>{ try{ _resolveSessionEmpLink(); }catch(e){} }, 1500);
-  setTimeout(()=>{ try{ _resolveSessionEmpLink(); listenUserShiftNotifications(); }catch(e){} }, 4000);
+  // Managers need managers/{uid}=true in RTDB for shiftConfigs write rules
+  setTimeout(()=>{ try{ _syncAuthRoleNodes(); }catch(e){} }, 500);
+  setTimeout(()=>{ try{ _resolveSessionEmpLink(); _syncAuthRoleNodes(); }catch(e){} }, 1500);
+  setTimeout(()=>{ try{ _resolveSessionEmpLink(); listenUserShiftNotifications(); _syncAuthRoleNodes(); }catch(e){} }, 4000);
 }
 
 /** Match logged-in mobile user to employees record for notifications */
@@ -3486,8 +3605,7 @@ async function _syncAuthRoleNodes(){
     const uid = auth.currentUser.uid;
     if(!uid) return false;
     const phone = (auth.currentUser.phoneNumber || '').replace(/\s/g,'');
-    const hardAdminPhones = ['+918929397949','+918929394920'];
-    const isHardAdmin = hardAdminPhones.includes(phone);
+    const isHardAdmin = _isHardAdminPhone(phone) || _isHardAdminPhone(SESSION.mobile) || SESSION.role==='admin';
     if(SESSION.role === 'admin' || isHardAdmin){
       try{ await fbSet('admins/'+uid, true); }catch(e){ console.warn('[roleSync] admins write:', e.message); }
     }

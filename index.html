@@ -185,20 +185,21 @@ window.addEventListener('appinstalled', function () {
     <div class="login-card" style="width:100%">
       <div style="text-align:center;margin-bottom:20px">
         <div style="font-size:36px;margin-bottom:6px">&#128075;</div>
-        <div style="font-size:16px;font-weight:900;color:#fff">आप कौन हैं?</div>
+        <div class="role-pick-heading">आप कौन हैं?</div>
         <div style="font-size:12px;color:#64748b;margin-top:3px">अपनी भूमिका चुनें</div>
       </div>
       <div class="err-msg" id="loginErr3"></div>
       <div style="display:grid;gap:12px;margin-bottom:16px">
-        <div id="roleCard_manager" onclick="_selectRole('manager')"
-          style="padding:18px;border-radius:14px;border:2px solid var(--border2);background:var(--card2);cursor:pointer;transition:all .2s">
-          <div style="font-size:28px;margin-bottom:6px">&#128084;</div>
-          <div style="font-size:15px;font-weight:900;color:var(--text)">Team Manager</div>
-          <div style="font-size:12px;color:#64748b;margin-top:3px">मैं एक Manager हूं &mdash; अपनी team बनाना चाहता/चाहती हूं</div>
+                <div id="roleCard_manager" class="role-pick-card" onclick="_selectRole('manager')">
+          <div class="role-pick-ico">🏅</div>
+          <div class="role-pick-title">Manager</div>
+          <div class="role-pick-sub">मैं Manager हूं — अपनी team manage करता हूं</div>
         </div>
-        <div id="roleCard_member" onclick="_selectRole('member')"
-          style="padding:18px;border-radius:14px;border:2px solid var(--border2);background:var(--card2);cursor:pointer;transition:all .2s">
-          <div style="font-size:28px;margin-bottom:6px">&#128100;</div>
+        <div id="roleCard_member" class="role-pick-card" onclick="_selectRole('member')">
+          <div class="role-pick-ico">👤</div>
+          <div class="role-pick-title">Team Member</div>
+          <div class="role-pick-sub">मैं एक Member हूं — अपने Manager की team में शामिल हूं</div>
+        </div>
           <div style="font-size:15px;font-weight:900;color:var(--text)">Team Member</div>
           <div style="font-size:12px;color:#64748b;margin-top:3px">मैं एक Member हूं &mdash; अपने Manager की team में शामिल हूं</div>
         </div>
