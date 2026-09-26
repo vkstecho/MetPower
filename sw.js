@@ -1,6 +1,9 @@
-/* MET Power — service worker (installability + offline shell)
-   Fixed: no infinite update/reload loop */
-const CACHE = 'metpower-v5';
+/* MET Power — service worker
+   - Fixed infinite reload loop
+   - Never deletes glsmp-integrity (session integrity token) on activate
+*/
+const CACHE = 'metpower-v6';
+const KEEP_CACHES = new Set([CACHE, 'glsmp-integrity']);
 const PRECACHE = [
   './',
   './index.html',
@@ -13,8 +16,6 @@ const PRECACHE = [
 ];
 
 self.addEventListener('install', (event) => {
-  // Do NOT call skipWaiting() here automatically — wait for client message
-  // so the page can control when to activate and avoid reload loops.
   event.waitUntil(
     caches.open(CACHE).then((c) => c.addAll(PRECACHE).catch(() => {}))
   );
@@ -23,12 +24,15 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((k) => !KEEP_CACHES.has(k))
+          .map((k) => caches.delete(k))
+      )
     ).then(() => self.clients.claim())
   );
 });
 
-// Client can request immediate activation (one-time)
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING' || (event.data && event.data.type === 'SKIP_WAITING')) {
     self.skipWaiting();
@@ -39,7 +43,6 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // Don't cache Firebase / API
   if (url.hostname.includes('firebase') || url.hostname.includes('googleapis') || url.hostname.includes('gstatic')) {
     return;
   }

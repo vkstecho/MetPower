@@ -1585,20 +1585,13 @@ async function enforceIntegrityOnBoot(){
     const tokenOk = await checkIntegrityToken();
 
     if(!tokenOk){
-      const wasBootstrapped = localStorage.getItem('mp_int_ok') === '1';
-
-      if(!wasBootstrapped){
-        // First time running new code — write token, allow boot
-        await writeIntegrityToken();
-        localStorage.setItem('mp_int_ok','1');
-        return;
-      }
-
-      // Cache was cleared → force logout cleanly
-      console.warn('[integrity] Cache cleared — invalidating session');
-      _clearAllSessionData();
-      _showLoginScreenSafely();
-      throw new Error('INTEGRITY_FAIL');
+      // Token missing — common after SW cache version bump (old caches deleted).
+      // Keep the user logged in and re-write the token. Only real "Clear site data"
+      // wipes localStorage session too; that path already has no session above.
+      console.warn('[integrity] Token missing — re-binding session (no logout)');
+      await writeIntegrityToken();
+      localStorage.setItem('mp_int_ok','1');
+      return;
     } else {
       localStorage.setItem('mp_int_ok','1');
     }
@@ -19965,18 +19958,18 @@ async function pushShiftNotification(empObjId, empName, date, oldShift, newShift
 // ════════════════════════════════════════
 function initPWA(){
   if('serviceWorker' in navigator){
-    // Single stable registration URL (no query param) — prevents update loops
     navigator.serviceWorker.register('/sw.js').then(reg=>{
       console.log('SW registered:', reg.scope);
 
-      // Prevent infinite reload: only auto-refresh once per browser session
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if(refreshing) return;
-        // Only reload if we intentionally activated a waiting worker
         if(sessionStorage.getItem('mp_sw_pending_reload') === '1'){
           sessionStorage.removeItem('mp_sw_pending_reload');
           refreshing = true;
+          // Re-bind integrity token BEFORE reload so boot does not log the user out
+          try{ writeIntegrityToken(); }catch(e){}
+          try{ localStorage.setItem('mp_int_ok','1'); }catch(e){}
           window.location.reload();
         }
       });
@@ -19985,18 +19978,19 @@ function initPWA(){
         const newWorker = reg.installing;
         if(!newWorker) return;
         newWorker.addEventListener('statechange', () => {
-          // New SW installed while an old one controls the page
           if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
-            // Already prompted/reloaded this session? Skip to avoid loop
+            // At most one auto-refresh per tab session
             if(sessionStorage.getItem('mp_sw_update_done') === '1') return;
             sessionStorage.setItem('mp_sw_update_done', '1');
             sessionStorage.setItem('mp_sw_pending_reload', '1');
+            try{ writeIntegrityToken(); }catch(e){}
+            try{ localStorage.setItem('mp_int_ok','1'); }catch(e){}
             try{ newWorker.postMessage('SKIP_WAITING'); }catch(e){}
             try{ toast('🔄 New version available — refreshing...'); }catch(e){}
-            // Fallback reload if controllerchange doesn't fire
             setTimeout(() => {
               if(sessionStorage.getItem('mp_sw_pending_reload') === '1'){
                 sessionStorage.removeItem('mp_sw_pending_reload');
+                try{ writeIntegrityToken(); }catch(e){}
                 window.location.reload();
               }
             }, 3000);
@@ -20004,7 +19998,6 @@ function initPWA(){
         });
       });
 
-      // Check for updates occasionally (not aggressively)
       setTimeout(() => {
         try{ setInterval(() => { reg.update().catch(()=>{}); }, 30 * 60 * 1000); }catch(e){}
       }, 120000);
